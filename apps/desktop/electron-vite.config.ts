@@ -1,9 +1,12 @@
-import { defineConfig } from 'electron-vite'
+import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 import { resolve } from 'path'
 
 export default defineConfig({
   main: {
+    // electron-updater loads parts of itself at run time, so it stays a real
+    // module in the package rather than being folded into the bundle.
+    plugins: [externalizeDepsPlugin()],
     build: {
       rollupOptions: {
         input: resolve(__dirname, 'src/main/main.ts'),

@@ -29,6 +29,7 @@ import { DEFAULT_AUDIO_LANES, type AudioLanesSetting, type AudioTrackId } from '
 import { decideAutostart } from '../shared/autostart'
 import { clipPathFromUrl, captureCommand, isLinuxInfrastructure, type CaptureCommand } from '../shared/platform'
 import { FEEDBACK_ENDPOINT, validateFeedback } from '../shared/feedback'
+import { startAutoUpdate } from './updater'
 import { linuxAutostartEnabled, setLinuxAutostart, linuxProcessSnapshot } from './linux'
 
 
@@ -2088,6 +2089,7 @@ app.on('ready', () => {
   registerHotkeys()
   startGameDetection()
   startCaptureWatchdog()
+  startAutoUpdate((update) => mainWindow?.webContents.send('update-state', update))
   commandsReady = true
   const initialCommand = captureCommand(process.argv)
   if (initialCommand) pendingCommands.push(initialCommand)

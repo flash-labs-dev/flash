@@ -21,8 +21,14 @@
     },
     "files": [
       "out/**/*",
-      "package.json",
-      "!node_modules/**"
+      "package.json"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "lillyfloweruwu-arch",
+        "repo": "flash"
+      }
     ],
     "extraResources": [
       {
@@ -49,6 +55,7 @@
       ]
     },
     "nsis": {
+      "artifactName": "Flash-Setup-${version}.${ext}",
       "oneClick": false,
       "perMachine": false,
       "allowToChangeInstallationDirectory": true,
@@ -118,5 +125,8 @@
     "typescript": "^5.7.0",
     "vite": "^6.0.0"
   },
-  "desktopName": "flash.desktop"
+  "desktopName": "flash.desktop",
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  }
 }
