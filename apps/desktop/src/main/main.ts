@@ -830,7 +830,10 @@ async function runSaveClip(seconds?: number): Promise<{ path?: string; duration?
     const status = captureAddon.getStatus()
     if (status.recording === false || status.captureHealthy === false) {
       const reason = status.captureError || 'capture stopped'
-      setRecordingState(false, `Capture stopped: ${reason}`)
+      // Handed to the watchdog, which keeps trying to bring capture back. Left as
+      // a plain stop, nothing would ever restart it and every later hotkey press
+      // would report the same error.
+      setRecordingState(false, `Capture stopped: ${reason}. Retrying automatically.`, true)
       return { error: `Capture stopped: ${reason}` }
     }
   } catch { /* fall through and let the save attempt report the failure */ }
@@ -1775,13 +1778,37 @@ function setupIPC() {
 let watchdogTimer: ReturnType<typeof setInterval> | null = null
 let restartAttempts = 0
 let lastRestart = 0
+// True only while the watchdog itself has stopped recording after failed
+// restarts. A stop the user asked for never sets it, so the watchdog keeps
+// trying to bring capture back without ever overriding a deliberate stop.
+let autoStopped = false
+let lastAutoRetry = 0
 
 function startCaptureWatchdog() {
   watchdogTimer = setInterval(checkCaptureHealth, 5000)
 }
 
 function checkCaptureHealth() {
-  if (!captureAddon || !isRecording) return
+  if (!captureAddon) return
+  if (!isRecording && !autoStopped) return
+  // Windows only: after giving up, keep retrying slowly. A display that went
+  // away for a moment (mode change, monitor sleep, driver reset) comes back, and
+  // waiting for a click on the REC badge left F8 refusing to save until then.
+  if (!isRecording && autoStopped) {
+    if (process.platform === 'linux' || Date.now() - lastAutoRetry < 10_000) return
+    lastAutoRetry = Date.now()
+    try {
+      captureAddon.stopReplayBuffer()
+      if (captureAddon.startReplayBuffer()) {
+        console.log('Capture watchdog: recovered after stop')
+        restartAttempts = 0
+        setRecordingState(true)
+      }
+    } catch (error) {
+      console.warn('Capture watchdog: slow retry failed', error)
+    }
+    return
+  }
   let status: ReturnType<CaptureAddon['getStatus']>
   try { status = captureAddon.getStatus() } catch { return }
   if (status.capturePending) return
@@ -1806,7 +1833,7 @@ function checkCaptureHealth() {
   const now = Date.now()
   if (now - lastRestart > 60_000) restartAttempts = 0
   if (restartAttempts >= 3) {
-    setRecordingState(false, `Capture stopped: ${reason}. Press the REC badge to retry.`)
+    setRecordingState(false, `Capture stopped: ${reason}. Retrying automatically.`, true)
     return
   }
   restartAttempts++
@@ -1823,13 +1850,14 @@ function checkCaptureHealth() {
   } catch (error) {
     console.warn('Capture watchdog: restart failed', error)
   }
-  setRecordingState(false, `Capture stopped: ${reason}`)
+  setRecordingState(false, `Capture stopped: ${reason}. Retrying automatically.`, true)
 }
 
 // One place that fixes the flag, the tray, the overlay and the renderer together,
 // so they cannot disagree about whether Flash is recording.
-function setRecordingState(recording: boolean, error?: string) {
+function setRecordingState(recording: boolean, error?: string, byWatchdog = false) {
   isRecording = recording
+  autoStopped = byWatchdog && !recording
   updateTrayMenu()
   updateOverlay()
   mainWindow?.webContents.send('recording-state', recording)
