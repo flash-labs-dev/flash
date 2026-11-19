@@ -26,7 +26,7 @@
     "publish": [
       {
         "provider": "github",
-        "owner": "lillyfloweruwu-arch",
+        "owner": "flash-labs-dev",
         "repo": "flash"
       }
     ],
