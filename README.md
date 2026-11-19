@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/lillyfloweruwu-arch/flash/releases/download/v0.1.0-beta.1/Flash.Setup.0.1.0-beta.1.exe"><img src="docs/banner/btn-windows.png" alt="Download Flash for Windows (installer, .exe)" width="400"></a>
+  <a href="https://github.com/lillyfloweruwu-arch/flash/releases/download/v0.1.0-beta.2/Flash-Setup-0.1.0-beta.2.exe"><img src="docs/banner/btn-windows.png" alt="Download Flash for Windows (installer, .exe)" width="400"></a>
   &nbsp;
-  <a href="https://github.com/lillyfloweruwu-arch/flash/releases/download/v0.1.0-beta.1/Flash-0.1.0-beta.1.AppImage"><img src="docs/banner/btn-linux.png" alt="Download Flash for Linux (AppImage, experimental)" width="400"></a>
+  <a href="https://github.com/lillyfloweruwu-arch/flash/releases/download/v0.1.0-beta.2/Flash-0.1.0-beta.2.AppImage"><img src="docs/banner/btn-linux.png" alt="Download Flash for Linux (AppImage, experimental)" width="400"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/lillyfloweruwu-arch/flash/releases/tag/v0.1.0-beta.1">All downloads and notes</a>
+  <a href="https://github.com/lillyfloweruwu-arch/flash/releases/tag/v0.1.0-beta.2">All downloads and notes</a>
 </p>
 
 <p align="center"><sub>Windows will warn that the installer is unsigned. Click <b>More info</b>, then <b>Run anyway</b>.</sub></p>
