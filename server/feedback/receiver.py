@@ -62,11 +62,36 @@ class RateLimiter:
             for q in (self.by_ip[ip], self.all):
                 while q and now - q[0] > 3600:
                     q.popleft()
+            # Forget addresses with no recent hits so the table cannot grow
+            # without bound.
+            for stale in [k for k, q in self.by_ip.items() if not q and k != ip]:
+                del self.by_ip[stale]
             if len(self.by_ip[ip]) >= self.per_ip or len(self.all) >= self.total:
                 return False
             self.by_ip[ip].append(now)
             self.all.append(now)
             return True
+
+
+# Bytes promised to uploads still in flight, so two large uploads that start
+# together cannot both pass a cap that only one of them fits under.
+reserved = 0
+reserved_lock = threading.Lock()
+
+
+def reserve(length):
+    global reserved
+    with reserved_lock:
+        if store_bytes() + reserved + length > MAX_STORE_BYTES:
+            return False
+        reserved += length
+        return True
+
+
+def release(length):
+    global reserved
+    with reserved_lock:
+        reserved -= length
 
 
 feedback_limit = RateLimiter(PER_IP_PER_HOUR, GLOBAL_PER_HOUR)
@@ -169,7 +194,12 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def client_ip(self):
-        return self.headers.get("X-Forwarded-For", self.client_address[0]).split(",")[0].strip()
+        # The proxy in front appends the address it saw to the right of whatever
+        # the client sent, so the right-most entry is the only one that cannot be
+        # forged. The left-most is the client's own claim.
+        forwarded = self.headers.get("X-Forwarded-For", "")
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        return parts[-1] if parts else self.client_address[0]
 
     def reply(self, code, body=b"", content_type=None):
         self.send_response(code)
@@ -231,8 +261,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(429)
         os.makedirs(CLIPS_DIR, exist_ok=True)
         cleanup()
-        if store_bytes() + length > MAX_STORE_BYTES:
+        if not reserve(length):
             return self.reply(507)
+        try:
+            return self.store_clip(length)
+        finally:
+            release(length)
+
+    def store_clip(self, length):
         clip_id = secrets.token_urlsafe(9)
         name = clip_id + ".mp4"
         tmp = os.path.join(CLIPS_DIR, "." + clip_id + ".part")

@@ -112,6 +112,26 @@ class ClipTests(unittest.TestCase):
         self.assertEqual(codes[:6], [201] * 6)
         self.assertEqual(codes[6:], [429, 429])
 
+    def test_forged_forwarded_for_does_not_dodge_the_limit(self):
+        self.clear_store()
+        codes = []
+        for i in range(8):
+            headers = {"Content-Type": "video/mp4", "X-Forwarded-For": "10.9.9.%d, 203.0.113.7" % i}
+            codes.append(call(self.port, "POST", "/flash-clips", MP4, headers)[0])
+        self.assertEqual(codes[6:], [429, 429])
+
+    def test_inflight_uploads_count_against_the_cap(self):
+        self.clear_store()
+        original = receiver.MAX_STORE_BYTES
+        receiver.MAX_STORE_BYTES = 2500
+        try:
+            self.assertTrue(receiver.reserve(2000))
+            self.assertEqual(self.upload()[0], 507)
+            receiver.release(2000)
+            self.assertEqual(self.upload()[0], 201)
+        finally:
+            receiver.MAX_STORE_BYTES = original
+
     def test_storage_cap(self):
         self.clear_store()
         original = receiver.MAX_STORE_BYTES
