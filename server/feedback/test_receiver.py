@@ -132,6 +132,18 @@ class ClipTests(unittest.TestCase):
         finally:
             receiver.MAX_STORE_BYTES = original
 
+    def test_too_many_uploads_in_flight(self):
+        self.clear_store()
+        taken = 0
+        while receiver.uploads_slots.acquire(blocking=False):
+            taken += 1
+        try:
+            self.assertEqual(self.upload()[0], 503)
+        finally:
+            for _ in range(taken):
+                receiver.uploads_slots.release()
+        self.assertEqual(self.upload()[0], 201)
+
     def test_storage_cap(self):
         self.clear_store()
         original = receiver.MAX_STORE_BYTES

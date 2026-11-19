@@ -41,6 +41,9 @@ CLIP_TTL_SECONDS = int(os.environ.get("CLIP_TTL_SECONDS", str(7 * 24 * 3600)))
 CLIP_PER_IP_PER_HOUR = int(os.environ.get("CLIP_PER_IP_PER_HOUR", "10"))
 CLIP_GLOBAL_PER_HOUR = int(os.environ.get("CLIP_GLOBAL_PER_HOUR", "60"))
 CLEANUP_EVERY_SECONDS = 600
+MAX_INFLIGHT_UPLOADS = int(os.environ.get("MAX_INFLIGHT_UPLOADS", "4"))
+UPLOAD_DEADLINE_SECONDS = int(os.environ.get("UPLOAD_DEADLINE_SECONDS", "600"))
+uploads_slots = threading.BoundedSemaphore(MAX_INFLIGHT_UPLOADS)
 CLIP_NAME = re.compile(r"^[A-Za-z0-9_-]{12}\.mp4$")
 CLIP_URL = re.compile(r"^/c/([A-Za-z0-9_-]{12}\.mp4)$")
 CHUNK = 1024 * 1024
@@ -261,12 +264,19 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(429)
         os.makedirs(CLIPS_DIR, exist_ok=True)
         cleanup()
-        if not reserve(length):
-            return self.reply(507)
+        # Only a few uploads may be in flight at once, so slow senders cannot
+        # pin the whole storage budget with reservations.
+        if not uploads_slots.acquire(blocking=False):
+            return self.reply(503)
         try:
-            return self.store_clip(length)
+            if not reserve(length):
+                return self.reply(507)
+            try:
+                return self.store_clip(length)
+            finally:
+                release(length)
         finally:
-            release(length)
+            uploads_slots.release()
 
     def store_clip(self, length):
         clip_id = secrets.token_urlsafe(9)
@@ -274,9 +284,12 @@ class Handler(BaseHTTPRequestHandler):
         tmp = os.path.join(CLIPS_DIR, "." + clip_id + ".part")
         remaining = length
         first = True
+        deadline = time.time() + UPLOAD_DEADLINE_SECONDS
         try:
             with open(tmp, "wb") as f:
                 while remaining > 0:
+                    if time.time() > deadline:
+                        raise ValueError("upload too slow")
                     chunk = self.rfile.read(min(CHUNK, remaining))
                     if not chunk:
                         raise ValueError("short body")
