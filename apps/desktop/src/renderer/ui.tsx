@@ -46,7 +46,7 @@ export function timeAgo(timestamp: number): string {
 type IconName =
   | 'star' | 'copy' | 'folder' | 'trash' | 'edit' | 'camera' | 'send' | 'play' | 'pause'
   | 'volume' | 'mute' | 'up' | 'down' | 'left' | 'close' | 'search' | 'grid' | 'pencil' | 'check'
-  | 'image'
+  | 'image' | 'link' | 'download'
 
 const PATHS: Record<IconName, React.ReactNode> = {
   star: <path d="M12 3.2l2.7 5.5 6 .9-4.35 4.25 1.03 6-5.38-2.83-5.38 2.83 1.03-6L3.3 9.6l6-.9z" />,
@@ -69,6 +69,8 @@ const PATHS: Record<IconName, React.ReactNode> = {
   pencil: <path d="M4.5 19.5l1-4.2L15.8 5a1.8 1.8 0 012.5 0l.7.7a1.8 1.8 0 010 2.5L8.7 18.5z" />,
   check: <path d="M5 12.5l4.5 4.5L19 7.5" />,
   image: <><rect x="3.5" y="4.5" width="17" height="15" rx="2" /><circle cx="15.5" cy="9.5" r="1.6" /><path d="M4 17l5-5 4 4 2.5-2.5L20 18" /></>,
+  link: <><path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1" /><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1" /></>,
+  download: <><path d="M12 4v11M7.5 10.5L12 15l4.5-4.5" /><path d="M5 19.5h14" /></>,
 }
 
 export function Icon({ name, size = 20, filled = false, strokeWidth = 1.6 }: {

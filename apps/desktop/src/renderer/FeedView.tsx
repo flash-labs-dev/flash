@@ -58,6 +58,8 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
   const [muted, setMuted] = useState(false)
   const [frameBusy, setFrameBusy] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [shareBusy, setShareBusy] = useState(false)
   const [exportLimit, setExportLimit] = useState(DEFAULT_EXPORT_LIMIT)
 
   useEffect(() => {
@@ -209,6 +211,21 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
     }
   }
 
+  const shareClip = async () => {
+    if (!clip) return
+    const startedPath = clip.filePath
+    setShareBusy(true); setNote(null)
+    try {
+      const result = await window.flash?.shareClipLink(clip.filePath)
+      if (currentPathRef.current !== startedPath) return
+      setNote(result?.ok ? `Link copied. Works for ${result.days} days` : (result?.error ?? 'Could not make a link'))
+    } catch {
+      if (currentPathRef.current === startedPath) setNote('Could not make a link')
+    } finally {
+      setShareBusy(false)
+    }
+  }
+
   const copyFile = async () => {
     if (!clip) return
     const ok = await window.flash?.copyClipFile(clip.filePath)
@@ -298,15 +315,12 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
             <button onClick={grabFrame} disabled={frameBusy} className="btn">
               <Icon name="camera" size={15} /> {frameBusy ? 'Saving…' : 'Grab frame'}
             </button>
-            <div className="flex items-center" style={{ gap: 0 }}>
-              <button onClick={exportCopy} disabled={exportBusy} className="btn"
-                style={{ borderTopRightRadius: 0, borderBottomRightRadius: 0 }}
-                title={`Make a copy under ${Math.round(findExportLimit(exportLimit).bytes / 1048576)}MB to send in Discord`}>
-                <Icon name="send" size={15} /> {exportBusy ? 'Compressing…' : 'Export'}
+            {/\.mp4$/i.test(clip.filePath) && (
+              <button onClick={shareClip} disabled={shareBusy} className="btn"
+                title="Uploads this clip and copies a link that works for 7 days">
+                <Icon name="link" size={15} /> {shareBusy ? 'Uploading…' : 'Share clip'}
               </button>
-              <Dropdown value={exportLimit} onChange={setExportLimit} title="Upload limit to fit under"
-                options={EXPORT_LIMITS} width={150} variant="joined" />
-            </div>
+            )}
             {note && <span role="status" style={{ fontSize: 12, color: 'var(--fg)', marginLeft: 6, textShadow: '0 1px 8px rgba(0,0,0,0.8)' }}>{note}</span>}
           </div>
         )}
@@ -347,6 +361,29 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
           <Icon name="copy" size={30} strokeWidth={1.4} />
           <span>{copied ?? 'Copy'}</span>
         </button>
+        {!isShot && (
+          <div style={{ position: 'relative' }}>
+            <button className="rail-btn" onClick={() => setExportOpen(open => !open)} disabled={exportBusy}
+              aria-expanded={exportOpen}
+              title={`Make a smaller copy to send in Discord (under ${Math.round(findExportLimit(exportLimit).bytes / 1048576)}MB)`}>
+              <Icon name="download" size={30} strokeWidth={1.4} />
+              <span>{exportBusy ? 'Working…' : 'Export'}</span>
+            </button>
+            {exportOpen && (
+              <div className="flex flex-col items-stretch gap-2" style={{
+                position: 'absolute', right: 88, top: 0, width: 170, padding: 10, borderRadius: 14,
+                background: 'rgba(10,10,14,0.92)', border: '1px solid rgba(255,255,255,0.18)',
+              }}>
+                <span className="caps" style={{ fontSize: 10, color: 'var(--fg)' }}>Fit under</span>
+                <Dropdown value={exportLimit} onChange={setExportLimit} title="Upload limit to fit under"
+                  options={EXPORT_LIMITS} width={150} />
+                <button className="btn btn-solid" onClick={() => { setExportOpen(false); void exportCopy() }}>
+                  Export copy
+                </button>
+              </div>
+            )}
+          </div>
+        )}
         <button className="rail-btn" onClick={() => window.flash?.showClipInFolder(clip.filePath)} title="Show in folder">
           <Icon name="folder" size={30} strokeWidth={1.4} />
           <span>Folder</span>

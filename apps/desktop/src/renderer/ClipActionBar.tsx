@@ -61,7 +61,7 @@ export function ClipActionBar({ filePath, onClose, onDelete, middle, backLabel =
             }}
             title="Uploads this clip and copies a link that works for 7 days"
             className="btn btn-sm">
-            {linkNote ?? 'Copy link'}
+            {linkNote ?? 'Share'}
           </button>
         )}
         <button onClick={() => window.flash?.showClipInFolder(filePath)} className="btn btn-sm">
