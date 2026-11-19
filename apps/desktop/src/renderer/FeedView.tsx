@@ -60,6 +60,8 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
   const [exportBusy, setExportBusy] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [shareBusy, setShareBusy] = useState(false)
+  const [shareResult, setShareResult] = useState<{ url: string; days: number } | null>(null)
+  const [linkCopied, setLinkCopied] = useState(false)
   const [exportLimit, setExportLimit] = useState(DEFAULT_EXPORT_LIMIT)
 
   useEffect(() => {
@@ -218,7 +220,12 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
     try {
       const result = await window.flash?.shareClipLink(clip.filePath)
       if (currentPathRef.current !== startedPath) return
-      setNote(result?.ok ? `Link copied. Works for ${result.days} days` : (result?.error ?? 'Could not make a link'))
+      if (result?.ok) {
+        setLinkCopied(false)
+        setShareResult({ url: result.url, days: result.days })
+      } else {
+        setNote(result?.error ?? 'Could not make a link')
+      }
     } catch {
       if (currentPathRef.current === startedPath) setNote('Could not make a link')
     } finally {
@@ -252,6 +259,24 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
   return (
     <section aria-label="Clip feed" className="absolute inset-0 overflow-hidden select-none" style={{ background: '#000' }}
       onWheel={onWheel}>
+      {shareResult && (
+        <div role="dialog" aria-label="Clip link" className="absolute inset-0 flex items-center justify-center"
+          style={{ zIndex: 50, background: 'rgba(0,0,0,0.6)' }} onClick={() => setShareResult(null)}>
+          <div onClick={e => e.stopPropagation()} className="flex flex-col gap-3"
+            style={{ width: 420, maxWidth: '90%', padding: 20, borderRadius: 16, background: 'var(--surface, #16161a)', border: '1px solid var(--edge-soft)' }}>
+            <div style={{ fontWeight: 700, fontSize: 16 }}>Link ready</div>
+            <input readOnly value={shareResult.url} onFocus={e => e.currentTarget.select()}
+              style={{ width: '100%', padding: '10px 12px', borderRadius: 10, background: 'rgba(255,255,255,0.06)', border: '1px solid var(--edge-soft)', color: 'var(--fg)', fontSize: 13 }} />
+            <div style={{ fontSize: 12, opacity: 0.7 }}>Already copied to your clipboard. Works for {shareResult.days} days.</div>
+            <div className="flex gap-2 justify-end">
+              <button className="btn btn-sm btn-ghost" onClick={() => setShareResult(null)}>Close</button>
+              <button className="btn btn-sm" onClick={async () => {
+                try { await navigator.clipboard.writeText(shareResult.url); setLinkCopied(true) } catch { setLinkCopied(false) }
+              }}>{linkCopied ? 'Copied' : 'Copy link'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div key={clip.filePath} className="feed-media absolute inset-0" data-dir={direction ?? undefined}>
         {isShot ? (
           <img src={clipUrl(clip.filePath)} alt={clip.title} draggable={false}
