@@ -12,7 +12,7 @@ import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, ren
 import { Readable } from 'stream'
 import { pathToFileURL } from 'url'
 import { createHash } from 'crypto'
-import { statfs } from 'fs/promises'
+import { readFile, statfs } from 'fs/promises'
 import { toastHtml, overlayHtml, cornerBounds } from '../shared/windowTemplates'
 
 import { byteRange } from '../shared/byteRange'
@@ -29,6 +29,7 @@ import { DEFAULT_AUDIO_LANES, type AudioLanesSetting, type AudioTrackId } from '
 import { decideAutostart } from '../shared/autostart'
 import { clipPathFromUrl, captureCommand, isLinuxInfrastructure, type CaptureCommand } from '../shared/platform'
 import { FEEDBACK_ENDPOINT, validateFeedback } from '../shared/feedback'
+import { SHARE_DAYS, SHARE_UPLOAD_ENDPOINT, checkShareSize, shareUrlFromPath } from '../shared/shareLink'
 import { startAutoUpdate } from './updater'
 import { linuxAutostartEnabled, setLinuxAutostart, linuxProcessSnapshot } from './linux'
 
@@ -1733,6 +1734,41 @@ function setupIPC() {
       return { ok: false, error: 'failed' as const }
     } finally {
       clearTimeout(timer)
+    }
+  })
+
+  // Uploads the clip to the home server and puts the resulting link on the
+  // clipboard. The link stops working after SHARE_DAYS days.
+  let sharing = false
+  ipcMain.handle('share-clip-link', async (_event, filePath: string) => {
+    if (!isInsideClips(filePath) || !existsSync(filePath)) return { ok: false, error: 'Clip not found' }
+    if (extname(filePath).toLowerCase() !== '.mp4') return { ok: false, error: 'Only clips can be shared' }
+    const sizeError = checkShareSize(statSync(filePath).size)
+    if (sizeError) return { ok: false, error: sizeError }
+    if (sharing) return { ok: false, error: 'A link is already being made' }
+    sharing = true
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 5 * 60_000)
+    try {
+      const response = await net.fetch(SHARE_UPLOAD_ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'video/mp4' },
+        body: await readFile(filePath),
+        signal: controller.signal,
+      })
+      if (response.status === 429) return { ok: false, error: 'Too many links this hour. Try again later.' }
+      if (response.status === 507) return { ok: false, error: 'The share server is full right now.' }
+      if (response.status === 413) return { ok: false, error: 'The server refused this clip as too big.' }
+      if (response.status !== 201) return { ok: false, error: 'Could not reach the share server.' }
+      const url = shareUrlFromPath(((await response.json()) as { path?: unknown })?.path)
+      if (!url) return { ok: false, error: 'The share server sent an unexpected answer.' }
+      clipboard.writeText(url)
+      return { ok: true, url, days: SHARE_DAYS }
+    } catch {
+      return { ok: false, error: 'Could not reach the share server.' }
+    } finally {
+      clearTimeout(timer)
+      sharing = false
     }
   })
 

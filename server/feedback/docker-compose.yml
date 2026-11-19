@@ -5,12 +5,18 @@ services:
     command: python /app/receiver.py
     environment:
       INBOX_DIR: /data/inbox
+      CLIPS_DIR: /data/clips
       PORT: "8796"
+      # Share links: 100 MB per clip, 20 GB in total, gone after 7 days.
+      MAX_CLIP_BYTES: "104857600"
+      MAX_STORE_BYTES: "21474836480"
+      CLIP_TTL_SECONDS: "604800"
     ports:
       - "127.0.0.1:8796:8796"
     volumes:
       - ./receiver.py:/app/receiver.py:ro
       - /mnt/storage/flash-feedback:/data/inbox
+      - /mnt/storage/flash-clips:/data/clips
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]

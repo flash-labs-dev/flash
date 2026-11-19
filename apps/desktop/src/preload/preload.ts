@@ -83,6 +83,7 @@ contextBridge.exposeInMainWorld('flash', {
     'start-clip-drag', Array.isArray(filePaths) ? filePaths : [filePaths]),
   moveClips: (filePaths: string[], game: string) => ipcRenderer.invoke('move-clips', filePaths, game),
   copyClipFile: (filePath: string) => ipcRenderer.invoke('copy-clip-file', filePath),
+  shareClipLink: (filePath: string) => ipcRenderer.invoke('share-clip-link', filePath),
   readThumbnail: (filePath: string) => ipcRenderer.invoke('thumbnail-read', filePath),
   writeThumbnail: (filePath: string, bytes: Uint8Array) => ipcRenderer.invoke('thumbnail-write', filePath, bytes),
   saveClipFrame: (filePath: string, playheadSeconds: number, bytes: Uint8Array) =>
@@ -180,6 +181,7 @@ export type FlashAPI = {
   startClipDrag: (filePaths: string | string[]) => void
   moveClips: (filePaths: string[], game: string) => Promise<{ moved: number; error?: string }>
   copyClipFile: (filePath: string) => Promise<boolean>
+  shareClipLink: (filePath: string) => Promise<{ ok: true; url: string; days: number } | { ok: false; error: string }>
   readThumbnail: (filePath: string) => Promise<Uint8Array | null>
   writeThumbnail: (filePath: string, bytes: Uint8Array) => Promise<boolean>
   saveClipFrame: (filePath: string, playheadSeconds: number, bytes: Uint8Array) =>

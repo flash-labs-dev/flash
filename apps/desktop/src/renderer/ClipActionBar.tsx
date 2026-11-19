@@ -15,6 +15,8 @@ export function ClipActionBar({ filePath, onClose, onDelete, middle, backLabel =
   backLabel?: string
 }) {
   const [copied, setCopied] = useState<string | null>(null)
+  const [linkNote, setLinkNote] = useState<string | null>(null)
+  const [linkBusy, setLinkBusy] = useState(false)
 
   return (
     <div className="flex items-center justify-between gap-4 shrink-0 titlebar-drag" style={{ height: 56, padding: '0 20px', borderBottom: '1px solid var(--edge-soft)' }}>
@@ -41,6 +43,27 @@ export function ClipActionBar({ filePath, onClose, onDelete, middle, backLabel =
           className="btn btn-sm" style={{ cursor: 'grab' }}>
           {copied ?? 'Copy / drag'}
         </button>
+        {/\.mp4$/i.test(filePath) && (
+          <button
+            disabled={linkBusy}
+            onClick={async () => {
+              setLinkBusy(true)
+              setLinkNote('Uploading...')
+              try {
+                const result = await window.flash?.shareClipLink(filePath)
+                setLinkNote(result?.ok ? `Link copied. Works for ${result.days} days` : (result?.error ?? 'Could not make a link'))
+              } catch {
+                setLinkNote('Could not make a link')
+              } finally {
+                setLinkBusy(false)
+                setTimeout(() => setLinkNote(null), 4000)
+              }
+            }}
+            title="Uploads this clip and copies a link that works for 7 days"
+            className="btn btn-sm">
+            {linkNote ?? 'Copy link'}
+          </button>
+        )}
         <button onClick={() => window.flash?.showClipInFolder(filePath)} className="btn btn-sm">
           Show in folder
         </button>
