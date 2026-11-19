@@ -44,6 +44,9 @@ CLEANUP_EVERY_SECONDS = 600
 MAX_INFLIGHT_UPLOADS = int(os.environ.get("MAX_INFLIGHT_UPLOADS", "4"))
 UPLOAD_DEADLINE_SECONDS = int(os.environ.get("UPLOAD_DEADLINE_SECONDS", "600"))
 uploads_slots = threading.BoundedSemaphore(MAX_INFLIGHT_UPLOADS)
+# One upload at a time per client address.
+active_ips = set()
+active_lock = threading.Lock()
 CLIP_NAME = re.compile(r"^[A-Za-z0-9_-]{12}\.mp4$")
 CLIP_URL = re.compile(r"^/c/([A-Za-z0-9_-]{12}\.mp4)$")
 CHUNK = 1024 * 1024
@@ -266,7 +269,14 @@ class Handler(BaseHTTPRequestHandler):
         cleanup()
         # Only a few uploads may be in flight at once, so slow senders cannot
         # pin the whole storage budget with reservations.
+        ip = self.client_ip()
+        with active_lock:
+            if ip in active_ips:
+                return self.reply(429)
+            active_ips.add(ip)
         if not uploads_slots.acquire(blocking=False):
+            with active_lock:
+                active_ips.discard(ip)
             return self.reply(503)
         try:
             if not reserve(length):
@@ -277,6 +287,8 @@ class Handler(BaseHTTPRequestHandler):
                 release(length)
         finally:
             uploads_slots.release()
+            with active_lock:
+                active_ips.discard(ip)
 
     def store_clip(self, length):
         clip_id = secrets.token_urlsafe(9)
@@ -288,9 +300,13 @@ class Handler(BaseHTTPRequestHandler):
         try:
             with open(tmp, "wb") as f:
                 while remaining > 0:
-                    if time.time() > deadline:
+                    left = deadline - time.time()
+                    if left <= 0:
                         raise ValueError("upload too slow")
-                    chunk = self.rfile.read(min(CHUNK, remaining))
+                    # The deadline binds the socket itself, so a sender that
+                    # trickles bytes cannot outlast it.
+                    self.connection.settimeout(min(60, left))
+                    chunk = self.rfile.read1(min(CHUNK, remaining))
                     if not chunk:
                         raise ValueError("short body")
                     if first:
