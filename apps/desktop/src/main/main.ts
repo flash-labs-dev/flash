@@ -30,7 +30,7 @@ import { decideAutostart } from '../shared/autostart'
 import { clipPathFromUrl, captureCommand, isLinuxInfrastructure, type CaptureCommand } from '../shared/platform'
 import { FEEDBACK_ENDPOINT, validateFeedback } from '../shared/feedback'
 import { SHARE_DAYS, SHARE_UPLOAD_ENDPOINT, checkShareSize, shareUrlFromPath } from '../shared/shareLink'
-import { startAutoUpdate } from './updater'
+import { getUpdateState, installUpdateNow, startAutoUpdate } from './updater'
 import { linuxAutostartEnabled, setLinuxAutostart, linuxProcessSnapshot } from './linux'
 
 
@@ -1740,7 +1740,9 @@ function setupIPC() {
   // Uploads the clip to the home server and puts the resulting link on the
   // clipboard. The link stops working after SHARE_DAYS days.
   let sharing = false
-  ipcMain.handle('share-clip-link', async (_event, filePath: string) => {
+  ipcMain.handle('get-update-state', () => getUpdateState())
+  ipcMain.handle('install-update', () => { (app as any).isQuitting = true; installUpdateNow() })
+  ipcMain.handle('share-clip-link',async (_event, filePath: string) => {
     if (!isInsideClips(filePath) || !existsSync(filePath)) return { ok: false, error: 'Clip not found' }
     if (extname(filePath).toLowerCase() !== '.mp4') return { ok: false, error: 'Only clips can be shared' }
     const sizeError = checkShareSize(statSync(filePath).size)

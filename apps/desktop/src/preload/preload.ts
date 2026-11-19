@@ -60,6 +60,9 @@ contextBridge.exposeInMainWorld('flash', {
 
   getPlaybackVisibility: () => ipcRenderer.invoke('playback-visibility'),
   onPlaybackVisibility: (callback: (visible: boolean) => void) => subscribe('playback-visibility', callback),
+  getUpdateState: (): Promise<{ status: 'idle' | 'downloading' | 'ready'; version?: string }> => ipcRenderer.invoke('get-update-state'),
+  onUpdateState: (callback: (state: { status: 'idle' | 'downloading' | 'ready'; version?: string }) => void) => subscribe('update-state', callback),
+  installUpdate: (): Promise<void> => ipcRenderer.invoke('install-update'),
 
   // Recording
   toggleRecording: () => ipcRenderer.send('toggle-recording'),
@@ -163,6 +166,9 @@ export type FlashAPI = {
   platform: string
   getPlaybackVisibility: () => Promise<boolean>
   onPlaybackVisibility: (callback: (visible: boolean) => void) => () => void
+  getUpdateState: () => Promise<{ status: 'idle' | 'downloading' | 'ready'; version?: string }>
+  onUpdateState: (callback: (state: { status: 'idle' | 'downloading' | 'ready'; version?: string }) => void) => () => void
+  installUpdate: () => Promise<void>
   minimize: () => void
   maximize: () => void
   close: () => void

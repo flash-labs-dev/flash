@@ -174,6 +174,8 @@ export default function App() {
   const [feedPath, setFeedPath] = useState('')
   const [editingClip, setEditingClip] = useState<Clip | null>(null)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [update, setUpdate] = useState<{ status: 'idle' | 'downloading' | 'ready'; version?: string }>({ status: 'idle' })
+  const [updateDismissed, setUpdateDismissed] = useState(false)
   const [feedbackSent, setFeedbackSent] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [detectedGame, setDetectedGame] = useState<string | null>(null)
@@ -496,6 +498,8 @@ export default function App() {
     unsubscribe.push(window.flash.onGameDetected(setDetectedGame))
     window.flash.getCurrentGame().then(setDetectedGame)
     unsubscribe.push(window.flash.onClipSavedRefresh(() => refreshClips()))
+    window.flash.getUpdateState?.().then(setUpdate).catch(() => {})
+    unsubscribe.push(window.flash.onUpdateState(setUpdate))
 
     // Served over flash-clip, not file://. A renderer page on
     // http://localhost:5173 cannot load file:// media, so in development the
@@ -525,6 +529,15 @@ export default function App() {
         hotkey={settings.hotkey} saveState={saveState}
         onFeedback={() => setFeedbackOpen(true)}
       />
+
+      {update.status === 'ready' && !updateDismissed && (
+        <div role="status" className="absolute flex items-center gap-3"
+          style={{ zIndex: 40, right: 20, bottom: 20, padding: '10px 14px', borderRadius: 14, background: 'var(--surface, #16161a)', border: '1px solid var(--edge-soft)', boxShadow: '0 8px 30px rgba(0,0,0,0.4)' }}>
+          <span style={{ fontSize: 13 }}>Update ready{update.version ? ` (${update.version})` : ''}</span>
+          <button className="btn btn-sm" onClick={() => window.flash?.installUpdate()}>Restart to update</button>
+          <button className="btn btn-sm btn-ghost" onClick={() => setUpdateDismissed(true)}>Later</button>
+        </div>
+      )}
 
       {/* The feed is unmounted while the editor is open, not just covered by
           it. Left mounted, its <video> keeps playing underneath and its key

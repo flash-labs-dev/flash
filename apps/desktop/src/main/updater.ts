@@ -20,6 +20,12 @@ export function getUpdateState(): UpdateState {
   return state
 }
 
+// Restart now into the downloaded update. Only does anything once one is ready.
+export function installUpdateNow() {
+  if (state.status !== 'ready') return
+  autoUpdater.quitAndInstall(true, true)
+}
+
 function setState(next: UpdateState) {
   state = next
   onChange(state)
