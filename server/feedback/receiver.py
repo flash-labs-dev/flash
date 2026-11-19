@@ -271,9 +271,11 @@ class Handler(BaseHTTPRequestHandler):
         # pin the whole storage budget with reservations.
         ip = self.client_ip()
         with active_lock:
-            if ip in active_ips:
-                return self.reply(429)
-            active_ips.add(ip)
+            busy = ip in active_ips
+            if not busy:
+                active_ips.add(ip)
+        if busy:
+            return self.reply(429)
         if not uploads_slots.acquire(blocking=False):
             with active_lock:
                 active_ips.discard(ip)
