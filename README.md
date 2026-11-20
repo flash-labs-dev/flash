@@ -1,4 +1,4 @@
-﻿<p align="center">
+<p align="center">
   <img src="docs/banner/banner.png" alt="Flash. Game clipper for Windows and Linux. Free, open source, beta." width="100%">
 </p>
 

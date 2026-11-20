@@ -1,8 +1,8 @@
-﻿{
+{
   "name": "@flash/desktop",
   "version": "0.1.0-beta.4",
   "private": true,
-  "description": "Flash desktop app Ã¢â‚¬â€ Electron + React",
+  "description": "Flash desktop app â€” Electron + React",
   "main": "out/main/main.js",
   "scripts": {
     "dev": "electron-vite dev",
