@@ -5,7 +5,7 @@ import {
   SHARE_MAX_BYTES, SHARE_ORIGIN, SHARE_UPLOAD_ENDPOINT, checkShareSize, shareUrlFromPath,
 } from './shareLink.ts'
 
-assert.equal(SHARE_UPLOAD_ENDPOINT, 'https://lubuntuserver.tail857ab5.ts.net:10000/flash-clips')
+assert.equal(SHARE_UPLOAD_ENDPOINT, 'https://share.flashclipping.fyi/flash-clips')
 
 assert.equal(checkShareSize(1), null)
 assert.equal(checkShareSize(SHARE_MAX_BYTES), null)

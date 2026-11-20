@@ -123,10 +123,6 @@ contextBridge.exposeInMainWorld('flash', {
   listAudioApps: () => ipcRenderer.invoke('list-audio-apps'),
   listMicDevices: () => ipcRenderer.invoke('list-mic-devices'),
   forgetGame: (exe: string) => ipcRenderer.invoke('forget-game', exe),
-  identifyGame: (exe: string, name: string | null) => ipcRenderer.invoke('identify-game', exe, name),
-  onIdentifyGame: (callback: (request: { exe: string; suggested: string }) => void) => {
-    return subscribe('identify-game', callback)
-  },
   setSettings: (partial: Partial<Settings>) => ipcRenderer.invoke('set-settings', partial),
   getVoiceStatus: () => ipcRenderer.invoke('voice-status'),
   pickClipsFolder: () => ipcRenderer.invoke('pick-clips-folder'),
@@ -224,8 +220,6 @@ export type FlashAPI = {
   listMicDevices: () => Promise<{ devices: { id: string; name: string; isDefault: boolean }[] }>
   listAudioApps: () => Promise<{ supported: boolean; apps: { exe: string; name: string; lane: string; capturing: boolean }[] }>
   forgetGame: (exe: string) => Promise<Record<string, string>>
-  identifyGame: (exe: string, name: string | null) => Promise<Settings>
-  onIdentifyGame: (callback: (request: { exe: string; suggested: string }) => void) => () => void
   setSettings: (partial: Partial<Settings>) => Promise<Settings>
   getVoiceStatus: () => Promise<{ available: boolean; language: string; error: string }>
   pickClipsFolder: () => Promise<string | null>

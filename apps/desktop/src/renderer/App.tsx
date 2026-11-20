@@ -11,7 +11,7 @@ import { FeedView } from './FeedView'
 import { LibraryView, sortClips, type SortOrder } from './LibraryView'
 import { SettingsView, FeedbackDialog, type CaptureHealth, type Display, type Settings, type VoiceStatus } from './SettingsView'
 import {
-  type Clip, type ConfirmRequest, ConfirmDialog, IdentifyGamePrompt, StickmanIcon, formatBytes,
+  type Clip, type ConfirmRequest, ConfirmDialog, StickmanIcon, formatBytes,
 } from './ui'
 
 /* THESIS: one clip owns the window and the next is one flick away; Flash
@@ -213,7 +213,6 @@ export default function App() {
   // Settings instead of looking fine and doing nothing.
   const [hotkeysRegistered, setHotkeysRegistered] = useState(
     { hotkey: '', clip: true, short: true, screenshot: true })
-  const [identifyRequest, setIdentifyRequest] = useState<{ exe: string; suggested: string } | null>(null)
   const [health, setHealth] = useState<CaptureHealth | null>(null)
   const [learnedGames, setLearnedGames] = useState<Record<string, string>>({})
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>({
@@ -491,7 +490,6 @@ export default function App() {
     window.flash.getAutostart().then(setAutostart)
     window.flash.capture?.listDisplays?.()?.then(setDisplays)
     unsubscribe.push(window.flash.capture.onSaveState(setSaveState))
-    unsubscribe.push(window.flash.onIdentifyGame(setIdentifyRequest))
     window.flash.getLearnedGames().then(setLearnedGames)
     window.flash.hasCaptureAddon().then(setCaptureAvailable)
     window.flash.capture?.getStatus?.()?.then(s => { setEncoder(s.encoder); if (s.captureBackend) setCaptureBackend(s.captureBackend) })
@@ -633,12 +631,6 @@ export default function App() {
       )}
       {confirmRequest && (
         <ConfirmDialog request={confirmRequest} onClose={() => setConfirmRequest(null)} />
-      )}
-      {identifyRequest && (
-        <IdentifyGamePrompt request={identifyRequest} onClose={name => {
-          window.flash?.identifyGame(identifyRequest.exe, name)
-          setIdentifyRequest(null)
-        }} />
       )}
     </div>
   )

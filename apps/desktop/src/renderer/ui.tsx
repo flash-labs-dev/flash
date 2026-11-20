@@ -308,32 +308,3 @@ export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; o
     </DialogFrame>
   )
 }
-
-// Shown when something is running that looks like a game but is not in the
-// bundled database. Naming it once teaches Flash permanently; dismissing it
-// records the executable as "not a game" so it stops asking.
-export function IdentifyGamePrompt({ request, onClose }: {
-  request: { exe: string; suggested: string }
-  onClose: (name: string | null) => void
-}) {
-  const [name, setName] = useState(request.suggested)
-
-  return (
-    <DialogFrame label="Is this a game?" width={440}>
-      <h2 className="display" style={{ fontSize: 30, color: 'var(--fg)', marginBottom: 12 }}>Is this a game?</h2>
-      <p style={{ fontSize: 13, color: 'var(--muted)', lineHeight: 1.6, marginBottom: 18 }}>
-        Flash does not recognise <span style={{ color: 'var(--fg)' }}>{request.exe}</span>. Name it and
-        your clips will be filed under it from now on.
-      </p>
-      <input value={name} onChange={e => setName(e.target.value)} autoFocus aria-label="Game name"
-        onKeyDown={e => { if (e.key === 'Enter' && name.trim()) onClose(name.trim()); if (e.key === 'Escape') onClose(null) }}
-        className="field w-full mb-6" style={{ fontSize: 14 }} />
-      <div className="flex justify-end gap-2">
-        <button onClick={() => onClose(null)} className="btn">Not a game</button>
-        <button onClick={() => name.trim() && onClose(name.trim())} disabled={!name.trim()} className="btn btn-solid">
-          Save
-        </button>
-      </div>
-    </DialogFrame>
-  )
-}

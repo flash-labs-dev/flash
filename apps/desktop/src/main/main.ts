@@ -125,12 +125,19 @@ function saveSettings() {
   }
 }
 
-// "1080p 60fps" → encoder config. Bitrate scales with pixels*fps at ~0.09 bits/px/frame.
+// "1080p 60fps" → encoder config. Bitrate is ~0.08 bits/px/frame at 1080p60.
+// Two things let a clip stay small without a visible loss: past 60 fps each frame
+// differs less from the last, so bitrate grows with fps^0.45 rather than linearly;
+// and larger frames compress better per pixel, so bits/px falls slowly with
+// resolution (and rises a little below 1080p). 1080p60 is ~10 Mbps, 1080p144 ~15.
 function parseQuality(quality: string) {
   const match = /^(\d+)(?:p|K)\s+(\d+)fps$/i.exec(quality.trim())
   const height = match ? (match[1] === '4' ? 2160 : Number(match[1])) : 1080
   const fps = match ? Number(match[2]) : 60
-  const bitrateKbps = Math.round((height * (height * 16 / 9) * fps * 0.09) / 1000)
+  const effectiveFps = fps > 60 ? 60 * Math.pow(fps / 60, 0.45) : fps
+  const pixels = height * (height * 16 / 9)
+  const bitsPerPixel = 0.08 * Math.pow(pixels / (1080 * 1920), -0.1)
+  const bitrateKbps = Math.round((pixels * effectiveFps * bitsPerPixel) / 1000)
   return { height, fps, bitrateKbps }
 }
 
@@ -526,7 +533,6 @@ let notificationWindow: BrowserWindow | null = null
 let isRecording = false
 let currentGame: string | null = null
 let currentGamePid = 0
-const askedAbout = new Set<string>()
 const ignoredExecutables = new Set<string>()
 let gameDetectorInterval: ReturnType<typeof setInterval> | null = null
 
@@ -1053,12 +1059,6 @@ function startGameDetection() {
         catch (error) { console.warn('Could not clear game audio target', error) }
       }
       mainWindow?.webContents.send('game-detected', currentGame)
-      // Unrecognised but plausible: ask rather than filing clips under a guess.
-      // Asked once per executable — declining records it as "not a game".
-      if (game?.unknown && !askedAbout.has(game.exe)) {
-        askedAbout.add(game.exe)
-        mainWindow?.webContents.send('identify-game', { exe: game.exe, suggested: game.name })
-      }
       updateOverlay()
     }
   }
@@ -1671,30 +1671,8 @@ function setupIPC() {
     const learned = { ...learnedGames() }
     delete learned[exe.toLowerCase()]
     settings.learnedGames = learned
-    askedAbout.delete(exe)
     saveSettings()
     return { ...learned }
-  })
-
-  // The user naming an unrecognised process. A null name means "not a game",
-  // recorded so Flash stops asking about it.
-  ipcMain.handle('identify-game', (_event, exe: string, name: string | null) => {
-    const key = exe.toLowerCase()
-    const learned = { ...learnedGames() }
-    if (name) learned[key] = name
-    else delete learned[key]
-    settings.learnedGames = learned
-    if (!name && !settings.ignoredGames.includes(key)) settings.ignoredGames = [...settings.ignoredGames, key]
-    if (!name) ignoredExecutables.add(key)
-    saveSettings()
-    if (name) {
-      currentGame = name
-      applyCaptureSettings(name)
-      try { captureAddon?.setCurrentGame(name, currentGamePid) } catch { /* audio stays mixed */ }
-      mainWindow?.webContents.send('game-detected', name)
-      updateOverlay()
-    }
-    return { ...settings }
   })
   ipcMain.handle('pick-clips-folder', async () => {
     if (!mainWindow) return null

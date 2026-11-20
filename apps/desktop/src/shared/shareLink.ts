@@ -1,7 +1,7 @@
 // Share links: the clip is uploaded to the home server, which answers with a
 // short path. Shared by the main process (which uploads) and the self-check.
 
-export const SHARE_ORIGIN = 'https://lubuntuserver.tail857ab5.ts.net:10000'
+export const SHARE_ORIGIN = 'https://share.flashclipping.fyi'
 export const SHARE_UPLOAD_ENDPOINT = `${SHARE_ORIGIN}/flash-clips`
 // The server enforces the same cap; checking first avoids a long upload that
 // is certain to be refused.
