@@ -46,7 +46,11 @@ Type: Antonio (display, uppercase, tight leading) from Google Fonts with Bahnsch
 
 ## Hosting
 
-Cloudflare Pages, root directory `apps/site`, no build command. `share.flashclipping.fyi` stays on the existing tunnel and is not touched by the site.
+Cloudflare Workers static assets, root directory `apps/site`, no build command. `share.flashclipping.fyi` stays on the existing tunnel and is not touched by the site.
+
+## Watch page `/c/<id>`
+
+Shared links open a minimal Flash-branded page with the logo, one OS-aware download button, the clip, one metadata line, and “Never miss the clip.” The page uses the same tokens and type as the marketing site, stays responsive at phone widths, and contains no tracking. Expired clips and temporary server failures keep the same restrained layout with a short status message instead of the video.
 
 ## Out of scope for now
 

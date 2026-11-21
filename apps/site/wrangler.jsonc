@@ -1,7 +1,11 @@
 {
   "name": "flash-site",
+  "main": "worker.js",
   "compatibility_date": "2026-11-01",
-  "assets": { "directory": "." },
+  "assets": {
+    "directory": ".",
+    "run_worker_first": ["/c/*"]
+  },
   "routes": [
     { "pattern": "flashclipping.fyi", "custom_domain": true }
   ]

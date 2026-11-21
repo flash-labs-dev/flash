@@ -1,5 +1,7 @@
 wrangler.jsonc
+worker.js
 .assetsignore
 DESIGN.md
 node_modules
 .wrangler
+worker.test.mjs

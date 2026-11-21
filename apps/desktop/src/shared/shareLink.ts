@@ -2,6 +2,7 @@
 // short path. Shared by the main process (which uploads) and the self-check.
 
 export const SHARE_ORIGIN = 'https://share.flashclipping.fyi'
+export const SHARE_PAGE_ORIGIN = 'https://flashclipping.fyi'
 export const SHARE_UPLOAD_ENDPOINT = `${SHARE_ORIGIN}/flash-clips`
 // The server enforces the same cap; checking first avoids a long upload that
 // is certain to be refused.
@@ -20,5 +21,5 @@ export function checkShareSize(bytes: number): string | null {
 // it generates becomes a link, and it is always joined to our own origin.
 export function shareUrlFromPath(path: unknown): string | null {
   if (typeof path !== 'string' || !/^\/c\/[A-Za-z0-9_-]{12}\.mp4$/.test(path)) return null
-  return SHARE_ORIGIN + path
+  return SHARE_PAGE_ORIGIN + path.slice(0, -4)
 }
