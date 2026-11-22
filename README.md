@@ -3,13 +3,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/flash-labs-dev/flash/releases/download/v0.1.0-beta.6/Flash-Setup-0.1.0-beta.6.exe"><img src="docs/banner/btn-windows.png" alt="Download Flash for Windows (installer, .exe)" width="400"></a>
+  <a href="https://github.com/flash-labs-dev/flash/releases/download/v0.1.0-beta.7/Flash-Setup-0.1.0-beta.7.exe"><img src="docs/banner/btn-windows.png" alt="Download Flash for Windows (installer, .exe)" width="400"></a>
   &nbsp;
-  <a href="https://github.com/flash-labs-dev/flash/releases/download/v0.1.0-beta.6/Flash-0.1.0-beta.6.AppImage"><img src="docs/banner/btn-linux.png" alt="Download Flash for Linux (AppImage, experimental)" width="400"></a>
+  <a href="https://github.com/flash-labs-dev/flash/releases/download/v0.1.0-beta.7/Flash-0.1.0-beta.7.AppImage"><img src="docs/banner/btn-linux.png" alt="Download Flash for Linux (AppImage, experimental)" width="400"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/flash-labs-dev/flash/releases/tag/v0.1.0-beta.6">All downloads and notes</a>
+  <a href="https://github.com/flash-labs-dev/flash/releases/tag/v0.1.0-beta.7">All downloads and notes</a>
 </p>
 
 <p align="center"><sub>Windows will warn that the installer is unsigned. Click <b>More info</b>, then <b>Run anyway</b>.</sub></p>
