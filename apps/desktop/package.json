@@ -93,8 +93,7 @@
         "entry": {
           "Name": "Flash",
           "StartupWMClass": "flash",
-          "MimeType": "x-scheme-handler/flash;",
-          "Exec": "flash %U"
+          "MimeType": "x-scheme-handler/flash;"
         }
       },
       "extraResources": [
