@@ -24,19 +24,21 @@ Marketing and download page for flashclipping.fyi. Static HTML, one file, no bui
 
 Type: Antonio (display, uppercase, tight leading) from Google Fonts with Bahnschrift/Arial Narrow fallbacks; Segoe UI / system UI for body. Labels are 11px, 600 weight, 0.14em tracking, uppercase.
 
-## Sections
+## Homepage structure and motion
 
-1. Hero: full-bleed looping goal clip, "Never miss the clip.", one primary download button, version line. Button follows the visitor's OS (Windows default, Linux on Linux, "Get Flash" on phones).
-2. Steps: three 4:5 clip stages (Always recording, Press one key, Send a link). Each has one CSS-only overlay: REC chip with a filling buffer bar; F8 keycap press with a "Clip saved" toast; share link card with Discord, Instagram, TikTok, X and YouTube marks.
-3. Clip wall: six looping tiles with a game chip.
-4. Get Flash: Windows card (primary) and Linux card (outline, marked experimental). One line on the SmartScreen warning because the installer is unsigned.
-5. Footer: Releases, Source, Feedback.
+The page moves from a full-bleed clip hero and four-cell trust strip into the app, sharing, clip wall, FAQ, downloads, and footer. The app section presents Press, Trim, and Share as one accessible tabbed window rather than three separate cards. Sharing is shown twice in sequence: first as a Discord embed, then as the Flash watch page it opens. The clip wall can be filtered by game; its first visible tile is always the featured tile.
+
+The fixed navigation begins transparent over the hero. After the visitor scrolls, it gains a blurred ground-color surface and border, and its Download button appears. The link order is App, Share, Clips, FAQ, then Download.
+
+Reveals are short, one-time upward entrances and the hero uses only slight scroll parallax. The app tabs may rotate while idle, but direct interaction takes control. Reveals, parallax, autoplay, CSS animation, and tab auto-rotation are disabled under `prefers-reduced-motion`; content remains visible without JavaScript.
 
 ## Behaviour
 
 - Download links default to the current release asset URLs in the HTML so the page works with no JavaScript. A script then reads the GitHub releases list (pre-releases included, since there is no stable release yet) and updates asset URLs, sizes and version text. If the request fails the static values stay.
 - Videos are muted, looped, `playsinline`, with a poster frame. They play only while on screen. With `prefers-reduced-motion` they stay on the poster and the CSS animations stop.
-- Layout collapses at 860px: nav links hide, steps stack, wall becomes two columns, cards stack. 16px minimum side gutters on phones (20px used).
+- Only the hero preloads metadata on first load. Other videos begin with `preload="none"`; they load when observed in view. Wall tiles play on hover for pointer devices and while in view on touch devices.
+- Reveal motion is a short upward entrance used once per content group. The hero clip has restrained scroll parallax. App tabs rotate automatically only until the visitor chooses one. All reveal, parallax, autoplay, CSS animation, and tab auto-rotation behavior is disabled under `prefers-reduced-motion`.
+- Layout collapses at 860px: nav text links hide, the share demo and download cards stack, and the wall becomes two columns. The featured wall tile spans both columns. Phones use 20px side gutters and must not scroll horizontally.
 
 ## Footage rules
 
@@ -50,7 +52,23 @@ Cloudflare Workers static assets, root directory `apps/site`, no build command. 
 
 ## Watch page `/c/<id>`
 
-Shared links open a minimal Flash-branded page with the logo, one OS-aware download button, the clip, one metadata line, and “Never miss the clip.” The page uses the same tokens and type as the marketing site, stays responsive at phone widths, and contains no tracking. Expired clips and temporary server failures keep the same restrained layout with a short status message instead of the video.
+Shared links open a Flash-branded watch page with a logo and OS-aware download button in the navigation. The large 16:9 player is sized from the viewport height, with its title, optional expiry pill, copy action, and save action immediately underneath. A tap-for-sound control overlays muted autoplay video until the viewer unmutes it. On larger non-phone screens, a blurred copy of the clip may provide a resilient ambient glow behind the page.
+
+A horizontal CTA band sits below the player. It combines the animated F8 keycap, “Clip your own.” message, three short product checks, and a second OS-aware download button. Below 760px it stacks into a touch-friendly column, the download button becomes full width, and the player and metadata row use all available width without horizontal scrolling. Expired clips and temporary server failures use the same navigation and CTA shell, with an empty FLASH panel and the existing short status message but no video controls or clip actions.
+
+The page uses the shared Flash color and type tokens; green appears only in the expiry status dot. Focus-visible outlines cover interactive controls. Reduced-motion preference disables the keycap animation and prevents the ambient video glow from being created. The page contains no tracking.
+
+## Launch card (open in Flash)
+
+Approved 2026-11-21. On desktop browsers only, the watch page tries to open the Flash app with `flash://c/<id>` and shows a centered card over a dimmed, blurred page: Flash logo, "Opening in Flash..." heading (Antonio, uppercase), the line "Launching your Flash app to watch this clip. Feel free to close this tab, or keep watching here.", a thin animated progress bar, an "Always watch in browser" checkbox, and a full-width "Watch here" button (bone fill, dark text).
+
+- Phones and tablets (touch-primary, coarse pointer, or mobile user agent) never get the card and never attempt the launch; there is no mobile app.
+- The card dismisses itself after 5 seconds, and "Watch here" or Escape dismisses it sooner. The player underneath is never blocked after dismissal.
+- If the app is not installed nothing visible fails: the card simply times out into the normal web player.
+- "Always watch in browser" is stored in localStorage (wrapped in try/catch) and skips both the launch attempt and the card on later visits.
+- Expired and unavailable states never show the card or try to launch.
+- Reduced motion makes the progress bar static.
+- Card is role="dialog" with focus on "Watch here"; no tracking.
 
 ## Out of scope for now
 
