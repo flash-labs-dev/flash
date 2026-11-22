@@ -1,6 +1,6 @@
 import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, screen, shell, dialog, clipboard, ClipboardItem, powerMonitor, protocol, net } from 'electron'
 import { join, basename, dirname, extname } from 'path'
-import { release } from 'os'
+import { release, tmpdir } from 'os'
 
 // Must run before the app is ready, or the scheme is not treated as privileged
 // and range requests (video seeking) fail.
@@ -11,8 +11,8 @@ protocol.registerSchemesAsPrivileged([{
 import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { Readable } from 'stream'
 import { pathToFileURL } from 'url'
-import { createHash } from 'crypto'
-import { readFile, statfs } from 'fs/promises'
+import { createHash, randomUUID } from 'crypto'
+import { open as openFile, readFile, statfs } from 'fs/promises'
 import { toastHtml, overlayHtml, cornerBounds } from '../shared/windowTemplates'
 
 import { byteRange } from '../shared/byteRange'
@@ -29,7 +29,7 @@ import { DEFAULT_AUDIO_LANES, type AudioLanesSetting, type AudioTrackId } from '
 import { decideAutostart } from '../shared/autostart'
 import { clipPathFromUrl, captureCommand, isLinuxInfrastructure, type CaptureCommand } from '../shared/platform'
 import { FEEDBACK_ENDPOINT, validateFeedback } from '../shared/feedback'
-import { SHARE_DAYS, SHARE_UPLOAD_ENDPOINT, checkShareSize, shareUrlFromPath } from '../shared/shareLink'
+import { SHARE_DAYS, SHARE_MAX_BYTES, SHARE_ORIGIN, SHARE_UPLOAD_ENDPOINT, checkShareSize, parseFlashLink, shareCopyMaxBytes, shareUrlFromPath, type FlashLink } from '../shared/shareLink'
 import { getUpdateState, installUpdateNow, startAutoUpdate } from './updater'
 import { linuxAutostartEnabled, setLinuxAutostart, linuxProcessSnapshot } from './linux'
 
@@ -37,6 +37,10 @@ import { linuxAutostartEnabled, setLinuxAutostart, linuxProcessSnapshot } from '
 if (process.platform === 'linux') {
   app.setDesktopName('flash.desktop')
 }
+
+// Installers own protocol registration. Registering a development executable
+// would leave a machine-wide flash:// association pointing into a checkout.
+if (app.isPackaged) app.setAsDefaultProtocolClient('flash')
 
 // ── Settings (JSON file, no native deps) ─────────────────────────────────────
 
@@ -522,6 +526,8 @@ function loadCaptureAddon(): CaptureAddon | null {
 }
 
 let mainWindow: BrowserWindow | null = null
+let rendererReady = false
+const pendingFlashLinks: FlashLink[] = []
 
 function reportClipError(message: string) {
   console.warn(message)
@@ -607,6 +613,74 @@ function scanClips(): ClipInfo[] {
   // Newest first
   clips.sort((a, b) => b.createdAt - a.createdAt)
   return clips
+}
+
+function sharedMp4Url(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null
+  try {
+    const url = new URL(raw)
+    if (url.protocol !== 'https:' || url.origin !== SHARE_ORIGIN || url.username || url.password || url.search || url.hash) return null
+    if (!/^\/c\/[A-Za-z0-9_-]{12}\.mp4$/.test(url.pathname)) return null
+    return url.href
+  } catch {
+    return null
+  }
+}
+
+async function saveSharedClip(rawUrl: unknown): Promise<{ path?: string; error?: string }> {
+  const mp4Url = sharedMp4Url(rawUrl)
+  if (!mp4Url) return { error: 'Shared clip link is not valid' }
+
+  const folderError = ensureClipsFolder()
+  // A configured removable folder may have fallen back to the default. That
+  // warning is not a failed save as long as the active fallback now exists.
+  if (folderError && !existsSync(activeClipsFolder())) return { error: folderError }
+  let reservation: ReturnType<typeof reserveOutput> | undefined
+  let temporary = ''
+  let file: Awaited<ReturnType<typeof openFile>> | undefined
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 2 * 60 * 1000)
+  try {
+    reservation = reserveOutput(join(activeClipsFolder(), `${clipTimestamp(new Date())}.mp4`))
+    temporary = `${reservation.path}.partial.${randomUUID()}`
+    const response = await net.fetch(mp4Url, { redirect: 'error', signal: controller.signal })
+    if (!response.ok || response.url !== mp4Url) throw new Error('The shared clip could not be downloaded')
+    const declaredBytes = Number(response.headers.get('content-length'))
+    if (Number.isFinite(declaredBytes) && declaredBytes > SHARE_MAX_BYTES) throw new Error('The shared clip is over 100MB')
+    if (!response.body) throw new Error('The shared clip response was empty')
+
+    file = await openFile(temporary, 'wx')
+    const reader = response.body.getReader()
+    let received = 0
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      received += value.byteLength
+      if (received > SHARE_MAX_BYTES) {
+        await reader.cancel()
+        throw new Error('The shared clip is over 100MB')
+      }
+      await file.write(value)
+    }
+    if (received === 0) throw new Error('The shared clip response was empty')
+    await file.sync()
+    await file.close()
+    file = undefined
+    renameSync(temporary, reservation.path)
+    temporary = ''
+    try { writeSidecar(reservation.path, { game: 'Shared clip' }) } catch { /* sidecar is an optimisation */ }
+    mainWindow?.webContents.send('clip-saved-refresh')
+    return { path: reservation.path }
+  } catch (error: any) {
+    return { error: error?.name === 'AbortError' ? 'The shared clip download timed out' : error?.message || 'Could not save the shared clip' }
+  } finally {
+    clearTimeout(timeout)
+    if (file) await file.close().catch(() => {})
+    if (temporary && existsSync(temporary)) {
+      try { unlinkSync(temporary) } catch { /* best effort cleanup */ }
+    }
+    reservation?.release()
+  }
 }
 
 const clipDeletion = createClipDeletion({
@@ -1252,6 +1326,7 @@ function updateTrayMenu() {
 // ── Main Window ───────────────────────────────────────────────────────────────
 
 function createWindow() {
+  rendererReady = false
   mainWindow = new BrowserWindow({
     width: 1280, height: 800,
     minWidth: 900, minHeight: 600,
@@ -1282,7 +1357,11 @@ function createWindow() {
   mainWindow.on('hide', publishVisibility)
   mainWindow.on('minimize', publishVisibility)
   mainWindow.on('restore', publishVisibility)
-  mainWindow.webContents.on('did-finish-load', publishVisibility)
+  mainWindow.webContents.on('did-finish-load', () => {
+    rendererReady = true
+    publishVisibility()
+    flushFlashLinks()
+  })
 
   mainWindow.on('close', (event) => {
     if (!(app as any).isQuitting) {
@@ -1349,6 +1428,7 @@ function setupIPC() {
   // ── Clips ──
   ipcMain.handle('get-clips', () => scanClips())
   ipcMain.handle('get-storage', () => getStorageUsage())
+  ipcMain.handle('save-shared-clip', (_event, mp4Url: unknown) => saveSharedClip(mp4Url))
   ipcMain.handle('delete-clip', (_event, filePath: string) => deleteClip(filePath))
   ipcMain.handle('rename-clip', (_event, filePath: string, name: string) => renameClip(filePath, name))
   // Kept in the clip's own sidecar rather than in settings, so a starred clip
@@ -1723,17 +1803,32 @@ function setupIPC() {
   ipcMain.handle('share-clip-link',async (_event, filePath: string) => {
     if (!isInsideClips(filePath) || !existsSync(filePath)) return { ok: false, error: 'Clip not found' }
     if (extname(filePath).toLowerCase() !== '.mp4') return { ok: false, error: 'Only clips can be shared' }
-    const sizeError = checkShareSize(statSync(filePath).size)
-    if (sizeError) return { ok: false, error: sizeError }
     if (sharing) return { ok: false, error: 'A link is already being made' }
     sharing = true
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 5 * 60_000)
+    let temporaryPath: string | null = null
     try {
+      const originalBytes = statSync(filePath).size
+      let uploadPath = filePath
+      const addon = captureAddon
+      if (addon?.getClipKeyframes && addon.exportClip) {
+        try {
+          const { durationSeconds } = await addon.getClipKeyframes(filePath)
+          const maxBytes = shareCopyMaxBytes({ durationSeconds, fileBytes: originalBytes })
+          if (maxBytes !== null) {
+            temporaryPath = join(tmpdir(), `flash-share-${process.pid}-${randomUUID()}.mp4`)
+            await addon.exportClip(filePath, temporaryPath, { maxBytes, codec: 'h264', maxFps: 60 })
+            if (statSync(temporaryPath).size <= originalBytes) uploadPath = temporaryPath
+          }
+        } catch { /* Sharing the original is the safe fallback. */ }
+      }
+      const sizeError = checkShareSize(statSync(uploadPath).size)
+      if (sizeError) return { ok: false, error: sizeError }
       const response = await net.fetch(SHARE_UPLOAD_ENDPOINT, {
         method: 'POST',
         headers: { 'Content-Type': 'video/mp4' },
-        body: await readFile(filePath),
+        body: await readFile(uploadPath),
         signal: controller.signal,
       })
       if (response.status === 429) return { ok: false, error: 'Too many links this hour. Try again later.' }
@@ -1748,6 +1843,9 @@ function setupIPC() {
       return { ok: false, error: 'Could not reach the share server.' }
     } finally {
       clearTimeout(timer)
+      if (temporaryPath !== null) {
+        try { unlinkSync(temporaryPath) } catch { /* The export may have failed before creating it. */ }
+      }
       sharing = false
     }
   })
@@ -1949,6 +2047,36 @@ function dispatchCaptureCommand(command: CaptureCommand) {
   else void saveClipNow(command === 'short' ? settings.shortClipSeconds : undefined)
 }
 
+function flashLinkFromArgv(argv: readonly string[]): FlashLink | null {
+  for (const argument of argv) {
+    const link = parseFlashLink(argument)
+    if (link) return link
+  }
+  return null
+}
+
+function showMainWindow() {
+  if (!app.isReady()) return
+  if (!mainWindow) createWindow()
+  mainWindow?.show()
+  if (mainWindow?.isMinimized()) mainWindow.restore()
+  mainWindow?.focus()
+}
+
+function dispatchFlashLink(link: FlashLink) {
+  showMainWindow()
+  if (!rendererReady || !mainWindow) {
+    pendingFlashLinks.push(link)
+    return
+  }
+  mainWindow.webContents.send('open-shared-clip', link)
+}
+
+function flushFlashLinks() {
+  if (!rendererReady || !mainWindow) return
+  for (const link of pendingFlashLinks.splice(0)) mainWindow.webContents.send('open-shared-clip', link)
+}
+
 const primaryInstance = app.requestSingleInstanceLock()
 if (!primaryInstance) {
   app.quit()
@@ -1956,6 +2084,8 @@ if (!primaryInstance) {
   app.on('second-instance', (_event, argv) => {
     const command = captureCommand(argv)
     if (command) { dispatchCaptureCommand(command); return }
+    const flashLink = flashLinkFromArgv(argv)
+    if (flashLink) { dispatchFlashLink(flashLink); return }
     if (!app.isReady()) return
     if (!mainWindow) createWindow()
     // Windows launching a second copy at login, while Flash is already open, is
@@ -1964,6 +2094,11 @@ if (!primaryInstance) {
     mainWindow?.show()
     if (mainWindow?.isMinimized()) mainWindow.restore()
     mainWindow?.focus()
+  })
+  app.on('open-url', (event, rawUrl) => {
+    event.preventDefault()
+    const flashLink = parseFlashLink(rawUrl)
+    if (flashLink) dispatchFlashLink(flashLink)
   })
 }
 
@@ -2110,6 +2245,10 @@ app.on('ready', () => {
   const initialCommand = captureCommand(process.argv)
   if (initialCommand) pendingCommands.push(initialCommand)
   for (const command of pendingCommands.splice(0)) dispatchCaptureCommand(command)
+  if (!initialCommand) {
+    const initialFlashLink = flashLinkFromArgv(process.argv)
+    if (initialFlashLink) dispatchFlashLink(initialFlashLink)
+  }
 
   // Resume and display changes are the two events that reliably invalidate DXGI
   // duplication. Nudge the watchdog immediately rather than waiting up to 5s.

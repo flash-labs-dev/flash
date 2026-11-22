@@ -6,6 +6,14 @@ function subscribe<T extends unknown[]>(channel: string, callback: (...args: T) 
   return () => { ipcRenderer.removeListener(channel, listener) }
 }
 
+type SharedClipLink = { id: string; mp4Url: string }
+let latestSharedClip: SharedClipLink | null = null
+const sharedClipListeners = new Set<(link: SharedClipLink) => void>()
+ipcRenderer.on('open-shared-clip', (_event, link: SharedClipLink) => {
+  latestSharedClip = link
+  for (const listener of sharedClipListeners) listener(link)
+})
+
 export interface ClipInfo {
   id: string
   title: string
@@ -87,6 +95,12 @@ contextBridge.exposeInMainWorld('flash', {
   moveClips: (filePaths: string[], game: string) => ipcRenderer.invoke('move-clips', filePaths, game),
   copyClipFile: (filePath: string) => ipcRenderer.invoke('copy-clip-file', filePath),
   shareClipLink: (filePath: string) => ipcRenderer.invoke('share-clip-link', filePath),
+  saveSharedClip: (mp4Url: string) => ipcRenderer.invoke('save-shared-clip', mp4Url),
+  onOpenSharedClip: (callback: (link: SharedClipLink) => void) => {
+    sharedClipListeners.add(callback)
+    if (latestSharedClip) queueMicrotask(() => { if (latestSharedClip && sharedClipListeners.has(callback)) callback(latestSharedClip) })
+    return () => { sharedClipListeners.delete(callback) }
+  },
   readThumbnail: (filePath: string) => ipcRenderer.invoke('thumbnail-read', filePath),
   writeThumbnail: (filePath: string, bytes: Uint8Array) => ipcRenderer.invoke('thumbnail-write', filePath, bytes),
   saveClipFrame: (filePath: string, playheadSeconds: number, bytes: Uint8Array) =>
@@ -184,6 +198,8 @@ export type FlashAPI = {
   moveClips: (filePaths: string[], game: string) => Promise<{ moved: number; error?: string }>
   copyClipFile: (filePath: string) => Promise<boolean>
   shareClipLink: (filePath: string) => Promise<{ ok: true; url: string; days: number } | { ok: false; error: string }>
+  saveSharedClip: (mp4Url: string) => Promise<{ path?: string; error?: string }>
+  onOpenSharedClip: (callback: (link: { id: string; mp4Url: string }) => void) => () => void
   readThumbnail: (filePath: string) => Promise<Uint8Array | null>
   writeThumbnail: (filePath: string, bytes: Uint8Array) => Promise<boolean>
   saveClipFrame: (filePath: string, playheadSeconds: number, bytes: Uint8Array) =>

@@ -10,6 +10,7 @@ import Editor from './Editor'
 import { FeedView } from './FeedView'
 import { LibraryView, sortClips, type SortOrder } from './LibraryView'
 import { SettingsView, FeedbackDialog, type CaptureHealth, type Display, type Settings, type VoiceStatus } from './SettingsView'
+import { SharedClipView, type SharedClipLink } from './SharedClipView'
 import {
   type Clip, type ConfirmRequest, ConfirmDialog, StickmanIcon, formatBytes,
 } from './ui'
@@ -29,11 +30,11 @@ import {
    FINISH: unreviewed and undocumented is unfinished; this build ends with the
    finish review, the verdict, and DESIGN.md */
 
-type View = 'Feed' | 'Library' | 'Settings'
-const VIEWS: View[] = ['Feed', 'Library', 'Settings']
+type View = 'Feed' | 'Library' | 'Settings' | 'Shared'
+const VIEWS = ['Feed', 'Library', 'Settings'] as const
 // Shown names. "Feed" is the screen's form, but to a person it promises a
 // social feed, and Flash has no account and posts nothing.
-const VIEW_LABELS: Record<View, string> = { Feed: 'Watch', Library: 'Library', Settings: 'Settings' }
+const VIEW_LABELS: Record<(typeof VIEWS)[number], string> = { Feed: 'Watch', Library: 'Library', Settings: 'Settings' }
 
 // ── Window Controls ───────────────────────────────────────────────────────────
 
@@ -167,6 +168,7 @@ function TitleBar({ view, setView, overMedia, isRecording, onToggleRecording, de
 export default function App() {
   usePlaybackVisibility()
   const [view, setView] = useState<View>('Feed')
+  const [sharedClip, setSharedClip] = useState<SharedClipLink | null>(null)
   const [gameFilter, setGameFilter] = useState('All')
   const [starredOnly, setStarredOnly] = useState(false)
   const [clipQuery, setClipQuery] = useState('')
@@ -496,6 +498,11 @@ export default function App() {
     unsubscribe.push(window.flash.onGameDetected(setDetectedGame))
     window.flash.getCurrentGame().then(setDetectedGame)
     unsubscribe.push(window.flash.onClipSavedRefresh(() => refreshClips()))
+    unsubscribe.push(window.flash.onOpenSharedClip(link => {
+      setSharedClip(link)
+      setEditingClip(null)
+      setView('Shared')
+    }))
     window.flash.getUpdateState?.().then(setUpdate).catch(() => {})
     unsubscribe.push(window.flash.onUpdateState(setUpdate))
 
@@ -521,7 +528,7 @@ export default function App() {
   return (
     <div className="relative" style={{ width: '100vw', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
       <TitleBar
-        view={view} setView={setView} overMedia={view === 'Feed' && !editingClip}
+        view={view} setView={next => { setSharedClip(null); setView(next) }} overMedia={view === 'Feed' && !editingClip}
         isRecording={isRecording} onToggleRecording={toggleRecording}
         detectedGame={detectedGame} captureAvailable={captureAvailable}
         hotkey={settings.hotkey} saveState={saveState}
@@ -612,6 +619,8 @@ export default function App() {
           />
         </main>
       )}
+
+      {view === 'Shared' && sharedClip && <SharedClipView link={sharedClip} />}
 
       {editingClip && (
         <Editor clip={editingClip} onClose={() => setEditingClip(null)} />

@@ -15,6 +15,12 @@
     "appId": "com.flash.clipper",
     "afterPack": "build-hooks/after-pack.cjs",
     "productName": "Flash",
+    "protocols": [
+      {
+        "name": "Flash",
+        "schemes": ["flash"]
+      }
+    ],
     "directories": {
       "output": "../../release",
       "buildResources": "../../assets"
@@ -86,7 +92,9 @@
       "desktop": {
         "entry": {
           "Name": "Flash",
-          "StartupWMClass": "flash"
+          "StartupWMClass": "flash",
+          "MimeType": "x-scheme-handler/flash;",
+          "Exec": "flash %U"
         }
       },
       "extraResources": [
