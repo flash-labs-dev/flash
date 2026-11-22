@@ -33,14 +33,14 @@ export function SharedClipView({ link }: { link: SharedClipLink }) {
           <div className="caps" style={{ color: 'var(--muted)', marginBottom: 8 }}>Shared clip</div>
           <h1 className="display" style={{ color: 'var(--fg)', fontSize: 48, lineHeight: .92 }}>Shared clip</h1>
         </div>
-        <div style={{ flex: 1, minHeight: 0, display: 'grid', placeItems: 'center', background: '#000', border: '1px solid var(--edge-soft)' }}>
+        <div style={{ flex: 1, minHeight: 160, position: 'relative', display: 'grid', placeItems: 'center', background: '#000', border: '1px solid var(--edge-soft)' }}>
           {safeUrl
-            ? <video key={safeUrl} src={safeUrl} controls autoPlay style={{ width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} aria-label="Shared clip" />
+            ? <video key={safeUrl} src={safeUrl} controls autoPlay style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'contain', background: '#000' }} aria-label="Shared clip" />
             : <p role="alert" style={{ color: 'var(--alert)', fontSize: 13 }}>This shared clip link is not valid.</p>}
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <button className="btn btn-solid" type="button" onClick={save} disabled={!safeUrl || state === 'saving' || state === 'saved'}>
-            {state === 'saving' ? 'Savingâ€¦' : state === 'saved' ? 'Saved' : state === 'failed' ? 'Save failed â€” try again' : 'Save to library'}
+            {state === 'saving' ? 'Saving...' : state === 'saved' ? 'Saved' : state === 'failed' ? 'Save failed, try again' : 'Save to library'}
           </button>
         </div>
       </div>

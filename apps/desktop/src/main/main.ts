@@ -644,7 +644,8 @@ async function saveSharedClip(rawUrl: unknown): Promise<{ path?: string; error?:
     reservation = reserveOutput(join(activeClipsFolder(), `${clipTimestamp(new Date())}.mp4`))
     temporary = `${reservation.path}.partial.${randomUUID()}`
     const response = await net.fetch(mp4Url, { redirect: 'error', signal: controller.signal })
-    if (!response.ok || response.url !== mp4Url) throw new Error('The shared clip could not be downloaded')
+    // redirect: 'error' already rejects redirects. Electron's net.fetch leaves response.url empty, so it cannot be compared.
+    if (!response.ok) throw new Error('The shared clip could not be downloaded')
     const declaredBytes = Number(response.headers.get('content-length'))
     if (Number.isFinite(declaredBytes) && declaredBytes > SHARE_MAX_BYTES) throw new Error('The shared clip is over 100MB')
     if (!response.body) throw new Error('The shared clip response was empty')
