@@ -1,0 +1,18 @@
+[package]
+name = "flash"
+version = "0.2.0-alpha.0"
+edition = "2021"
+license = "MIT"
+description = "Flash game clipper: Rust + Tauri build"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde_json = "1"
+
+[features]
+# Serve the built UI from the binary. `tauri dev` turns this off to use the dev server.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]

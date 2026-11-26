@@ -16,3 +16,7 @@ out/
 release/
 
 .impeccable/
+
+# Rust / Tauri build
+target/
+apps/flash-tauri/src-tauri/gen/

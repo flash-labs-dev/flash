@@ -145,6 +145,15 @@ html, body {
   margin: 0;
   padding: 0;
   -webkit-font-smoothing: antialiased;
+  /* An app, not a page: labels and titles do not highlight on drag. */
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+/* Typing fields stay selectable so search, rename and feedback still work. */
+input, textarea, [contenteditable="true"] {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 :focus-visible {
