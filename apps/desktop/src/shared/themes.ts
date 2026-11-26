@@ -24,8 +24,8 @@ export interface Theme {
 export const THEMES: Record<string, Theme> = {
   blood: {
     label: 'Blood',
-    bg: '#0A0A0B', panel: '#121316', field: '#1B1D22', edge: '#2A2D34', hover: '#1F2126',
-    fg: '#F2F3F5', muted: '#9AA0AB', accent: '#E8192C', accentDim: '#8C0F1B',
+    bg: '#0B0B0C', panel: '#141417', field: '#17171A', edge: '#2A2A2F', hover: '#1C1C20',
+    fg: '#F4F4F5', muted: '#9A9AA3', accent: '#D10F0F', accentDim: '#7A0909',
     onAccent: '#FFFFFF', spark: '#FFB020',
     // The accent is red on this theme, so errors move to a hot rose that cannot
     // be mistaken for a live state.

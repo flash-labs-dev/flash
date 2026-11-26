@@ -88,17 +88,12 @@ export function Icon({ name, size = 20, filled = false, strokeWidth = 1.6 }: {
   )
 }
 
-export function StickmanIcon({ size = 22 }: { size?: number }) {
+// The bolt-F mark from docs/flash-ui-handoff/assets/logo-bolt.svg, without its metadata.
+export function BoltLogo({ size = 22 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="14" cy="3.5" r="2" />
-      <line x1="14" y1="5.5" x2="12" y2="11" />
-      <line x1="12" y1="8" x2="8.5" y2="6.5" />
-      <line x1="12" y1="8" x2="16" y2="6" />
-      <line x1="12" y1="11" x2="9" y2="16" />
-      <line x1="9" y1="16" x2="7" y2="14" />
-      <line x1="12" y1="11" x2="15" y2="15.5" />
-      <line x1="15" y1="15.5" x2="18" y2="17" />
+    <svg width={size} height={size * 606 / 540} viewBox="300 232 540 606" aria-hidden="true">
+      <polygon points="380,250 820,250 790,350 480,350 462,430 700,430 480,820 520,560 320,560"
+        fill="currentColor" stroke="currentColor" strokeWidth="26" strokeLinejoin="round" />
     </svg>
   )
 }

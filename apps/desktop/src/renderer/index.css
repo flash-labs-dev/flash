@@ -9,15 +9,16 @@
 
 :root,
 [data-theme='blood'] {
-  --bg: #0a0a0b;
-  --panel: #121316;
-  --field: #1b1d22;
-  --edge: #2a2d34;
-  --hover: #1f2126;
-  --fg: #f2f3f5;
-  --muted: #9aa0ab;
-  --accent: #e8192c;
-  --accent-dim: #8c0f1b;
+  /* Redesign spec palette (docs/flash-ui-handoff/DESIGN_SPEC.md §1). */
+  --bg: #0b0b0c;
+  --panel: #141417;
+  --field: #17171a;
+  --edge: #2a2a2f;
+  --hover: #1c1c20;
+  --fg: #f4f4f5;
+  --muted: #9a9aa3;
+  --accent: #d10f0f;
+  --accent-dim: #7a0909;
   --on-accent: #ffffff;
   --spark: #ffb020;
   /* The accent is red on this theme, so errors move to a hot rose that cannot
@@ -120,7 +121,18 @@
   --ok: #4ade80;
 
   --font-display: 'Antonio Variable', 'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif;
-  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Noto Sans', Cantarell, Ubuntu, sans-serif;
+  --font-ui: 'Inter Variable', system-ui, sans-serif;
+
+  /* Redesign neutrals shared by every theme: content ground, chrome and panel
+     dividers, and the two text steps between --fg and --muted. */
+  --bg-content: #0f0f11;
+  --border: #1f1f23;
+  --border-subtle: #222226;
+  --text-secondary: #d4d4d8;
+  --text-faint: #8b8b94;
+  --danger-text: #ff7b7b;
+  --error-bg: #1a1112;
+  --error-border: #4a1d20;
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }

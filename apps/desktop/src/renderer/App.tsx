@@ -12,7 +12,7 @@ import { LibraryView, sortClips, type SortOrder } from './LibraryView'
 import { SettingsView, FeedbackDialog, type CaptureHealth, type Display, type Settings, type VoiceStatus } from './SettingsView'
 import { SharedClipView, type SharedClipLink } from './SharedClipView'
 import {
-  type Clip, type ConfirmRequest, ConfirmDialog, StickmanIcon, formatBytes,
+  type Clip, type ConfirmRequest, ConfirmDialog, BoltLogo, formatBytes,
 } from './ui'
 
 /* THESIS: one clip owns the window and the next is one flick away; Flash
@@ -90,7 +90,7 @@ function TitleBar({ view, setView, overMedia, isRecording, onToggleRecording, de
         borderBottom: overMedia ? '1px solid transparent' : '1px solid var(--edge-soft)',
       }}>
       <div className="flex items-center gap-2 titlebar-no-drag" style={{ marginRight: 36 }}>
-        <span style={{ color: 'var(--accent)', display: 'flex' }}><StickmanIcon size={20} /></span>
+        <span style={{ color: 'var(--fg)', display: 'flex' }}><BoltLogo size={18} /></span>
         <span className="display" style={{ fontSize: 21, color: 'var(--fg)', letterSpacing: '0.04em' }}>Flash</span>
       </div>
 
