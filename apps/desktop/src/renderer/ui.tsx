@@ -45,10 +45,11 @@ export function timeAgo(timestamp: number): string {
 // rather than switching to a second drawing, so state reads at a glance.
 type IconName =
   | 'star' | 'copy' | 'folder' | 'trash' | 'edit' | 'camera' | 'send' | 'play' | 'pause'
-  | 'volume' | 'mute' | 'up' | 'down' | 'left' | 'close' | 'search' | 'grid' | 'pencil' | 'check'
+  | 'sliders' | 'volume' | 'mute' | 'up' | 'down' | 'left' | 'close' | 'search' | 'grid' | 'pencil' | 'check'
   | 'image' | 'link' | 'download'
 
 const PATHS: Record<IconName, React.ReactNode> = {
+  sliders: <path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4" />,
   star: <path d="M12 3.2l2.7 5.5 6 .9-4.35 4.25 1.03 6-5.38-2.83-5.38 2.83 1.03-6L3.3 9.6l6-.9z" />,
   copy: <><rect x="8.5" y="8.5" width="11" height="11" rx="2" /><path d="M15.5 8.5V6a1.5 1.5 0 00-1.5-1.5H6A1.5 1.5 0 004.5 6v8A1.5 1.5 0 006 15.5h2.5" /></>,
   folder: <path d="M3.5 7.5A1.5 1.5 0 015 6h4.3l2 2.2H19a1.5 1.5 0 011.5 1.5v8.3A1.5 1.5 0 0119 19.5H5A1.5 1.5 0 013.5 18z" />,

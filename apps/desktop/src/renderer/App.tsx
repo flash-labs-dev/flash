@@ -12,7 +12,7 @@ import { LibraryView, sortClips, type SortOrder } from './LibraryView'
 import { SettingsView, FeedbackDialog, type CaptureHealth, type Display, type Settings, type VoiceStatus } from './SettingsView'
 import { SharedClipView, type SharedClipLink } from './SharedClipView'
 import {
-  type Clip, type ConfirmRequest, ConfirmDialog, BoltLogo, formatBytes,
+  type Clip, type ConfirmRequest, ConfirmDialog, BoltLogo, Icon, formatBytes,
 } from './ui'
 
 /* THESIS: one clip owns the window and the next is one flick away; Flash
@@ -31,10 +31,6 @@ import {
    finish review, the verdict, and DESIGN.md */
 
 type View = 'Feed' | 'Library' | 'Settings' | 'Shared'
-const VIEWS = ['Feed', 'Library', 'Settings'] as const
-// Shown names. "Feed" is the screen's form, but to a person it promises a
-// social feed, and Flash has no account and posts nothing.
-const VIEW_LABELS: Record<(typeof VIEWS)[number], string> = { Feed: 'Watch', Library: 'Library', Settings: 'Settings' }
 
 // ── Window Controls ───────────────────────────────────────────────────────────
 
@@ -60,7 +56,7 @@ function WindowControls() {
   )
 
   return (
-    <div className="flex items-stretch self-stretch titlebar-no-drag" style={{ marginRight: -20 }}>
+    <div className="flex items-stretch self-stretch titlebar-no-drag">
       <Button label="Minimize" onClick={() => window.flash?.minimize()} path="M0 5h10" />
       <Button label="Maximize" onClick={() => window.flash?.maximize()} path="M0.5 0.5h9v9h-9z" />
       <Button label="Close to tray" onClick={() => window.flash?.close()} path="M0.5 0.5l9 9M9.5 0.5l-9 9" danger />
@@ -70,55 +66,48 @@ function WindowControls() {
 
 // ── Title bar ─────────────────────────────────────────────────────────────────
 
-function TitleBar({ view, setView, overMedia, isRecording, onToggleRecording, detectedGame, captureAvailable, hotkey, saveState, onFeedback }: {
+const TITLE_HEIGHT = 56
+const SIDEBAR_WIDTH = 232
+
+function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailable, hotkey, hotkeyShort, saveState, onFeedback }: {
   onFeedback: () => void
-  view: View
-  setView: (view: View) => void
-  overMedia: boolean
   isRecording: boolean
   onToggleRecording: () => void
   detectedGame: string | null
   captureAvailable: boolean
   hotkey: string
+  hotkeyShort: string
   saveState: { saving: boolean; error?: string }
 }) {
+  const live = captureAvailable && isRecording
   return (
-    <header className="absolute inset-x-0 top-0 z-30 flex items-center titlebar-drag"
-      style={{
-        height: 48, padding: '0 20px',
-        background: overMedia ? 'transparent' : 'var(--bg)',
-        borderBottom: overMedia ? '1px solid transparent' : '1px solid var(--edge-soft)',
-      }}>
-      <div className="flex items-center gap-2 titlebar-no-drag" style={{ marginRight: 36 }}>
-        <span style={{ color: 'var(--fg)', display: 'flex' }}><BoltLogo size={18} /></span>
-        <span className="display" style={{ fontSize: 21, color: 'var(--fg)', letterSpacing: '0.04em' }}>Flash</span>
+    <header className="absolute inset-x-0 top-0 z-30 flex items-center gap-4 titlebar-drag"
+      style={{ height: TITLE_HEIGHT, padding: '0 0 0 20px', background: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
+      <div className="flex items-center gap-2" style={{ width: SIDEBAR_WIDTH - 36 }}>
+        <span style={{ color: 'var(--fg)', display: 'flex' }}><BoltLogo size={20} /></span>
+        <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>Flash</span>
       </div>
 
-      <nav aria-label="Main" className="flex items-center gap-6 titlebar-no-drag">
-        {VIEWS.map(name => (
-          <button key={name} className="tab" aria-current={view === name ? 'page' : undefined}
-            onClick={() => setView(name)}
-            style={overMedia && view !== name ? { color: 'color-mix(in srgb, var(--fg) 62%, transparent)' } : undefined}>
-            {VIEW_LABELS[name]}
-          </button>
-        ))}
-      </nav>
-
-      <button onClick={onFeedback} className="caps transition-colors titlebar-no-drag"
-        title="Tell us what's broken or what you want. We read every message."
+      {/* Status pill: the button that starts and stops the replay buffer. */}
+      <button onClick={onToggleRecording} disabled={!captureAvailable} aria-pressed={live}
+        className="flex items-center gap-2 titlebar-no-drag"
+        title={captureAvailable ? (live ? 'Replay buffer is running. Click to stop.' : 'Start the replay buffer') : 'Capture engine unavailable'}
         style={{
-          marginLeft: 28, height: 28, padding: '0 14px', borderRadius: 999, cursor: 'pointer',
-          color: 'var(--fg)', border: '1px solid var(--accent-line)', background: 'var(--accent-wash)',
+          height: 32, padding: '0 14px', borderRadius: 999, fontSize: 13, fontWeight: 500,
+          color: live ? 'var(--fg)' : 'var(--muted)', background: 'var(--field)', border: '1px solid var(--edge)',
+          cursor: captureAvailable ? 'pointer' : 'not-allowed',
         }}>
-        Feedback
+        {live ? <>Buffering{detectedGame && <span style={{ color: 'var(--muted)' }}>{detectedGame}</span>}</> : 'Not recording'}
       </button>
+
+      <div className="flex items-center gap-4" style={{ fontSize: 12, color: 'var(--muted)' }}>
+        <span className="flex items-center gap-2"><kbd className="keycap">{hotkey}</kbd>Save clip</span>
+        {hotkeyShort && <span className="flex items-center gap-2"><kbd className="keycap">{hotkeyShort}</kbd>Short clip</span>}
+      </div>
 
       <div className="ml-auto flex items-center gap-4 titlebar-no-drag">
         {saveState.saving && (
-          <span role="status" className="flex items-center gap-2 caps" style={{ color: 'var(--fg)' }}>
-            <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 99, background: 'var(--accent)', animation: 'pulse-red 0.8s ease-in-out infinite' }} />
-            Saving clip
-          </span>
+          <span role="status" style={{ fontSize: 13, color: 'var(--fg)' }}>Saving clip</span>
         )}
         {saveState.error && !saveState.saving && (
           <span role="alert" title={saveState.error}
@@ -126,40 +115,52 @@ function TitleBar({ view, setView, overMedia, isRecording, onToggleRecording, de
             {saveState.error}
           </span>
         )}
-
-        {detectedGame && (
-          <span className="flex items-center gap-2 caps" style={{ color: 'var(--muted)' }} title="Game Flash is watching">
-            <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--fg)' }} />
-            {detectedGame}
-          </span>
-        )}
-
-        <button onClick={onToggleRecording} disabled={!captureAvailable}
-          className="flex items-center gap-2 caps transition-colors"
-          aria-pressed={isRecording}
-          title={captureAvailable ? (isRecording ? 'Replay buffer is running. Click to stop.' : 'Start the replay buffer') : 'Capture engine unavailable'}
-          style={{
-            height: 28, padding: '0 12px', borderRadius: 999,
-            color: isRecording ? 'var(--fg)' : 'var(--muted)',
-            border: `1px solid ${isRecording ? 'var(--accent-line)' : 'var(--line)'}`,
-            background: isRecording ? 'var(--accent-wash)' : 'transparent',
-            cursor: captureAvailable ? 'pointer' : 'not-allowed',
-            opacity: captureAvailable ? 1 : 0.5,
-          }}>
-          <span aria-hidden="true" style={{
-            width: 8, height: 8, borderRadius: 99,
-            background: isRecording ? 'var(--accent)' : 'transparent',
-            border: isRecording ? 'none' : '1.5px solid var(--muted)',
-            animation: isRecording ? 'pulse-red 1.6s ease-in-out infinite' : 'none',
-          }} />
-          {isRecording ? 'Rec' : 'Idle'}
-        </button>
-
-        <span className="keycap" title="Clip hotkey">{hotkey}</span>
-
+        <button onClick={onFeedback} className="btn btn-sm btn-ghost"
+          title="Tell us what's broken or what you want. We read every message.">Feedback</button>
         <WindowControls />
       </div>
     </header>
+  )
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+
+type NavTarget = 'Feed' | 'Library' | 'Favorites' | 'Settings'
+
+function Sidebar({ active, onNavigate, storage }: {
+  active: NavTarget | null
+  onNavigate: (target: NavTarget) => void
+  storage: { used: number; clips: number }
+}) {
+  const Item = ({ target, label, icon }: { target: NavTarget; label: string; icon: React.ComponentProps<typeof Icon>['name'] }) => (
+    <button onClick={() => onNavigate(target)} aria-current={active === target ? 'page' : undefined}
+      className="flex items-center gap-3 w-full"
+      style={{
+        height: 40, padding: '0 12px', borderRadius: 6, fontSize: 14, fontWeight: 500, cursor: 'pointer',
+        color: active === target ? 'var(--fg)' : 'var(--text-faint)',
+        background: active === target ? 'var(--hover)' : 'transparent',
+      }}>
+      <Icon name={icon} />{label}
+    </button>
+  )
+  return (
+    <nav aria-label="Main" className="absolute left-0 bottom-0 flex flex-col"
+      style={{ top: TITLE_HEIGHT, width: SIDEBAR_WIDTH, padding: 12, background: 'var(--bg)', borderRight: '1px solid var(--border)' }}>
+      <Item target="Feed" label="Watch" icon="play" />
+      <Item target="Library" label="Library" icon="grid" />
+      <Item target="Favorites" label="Favorites" icon="star" />
+      <div className="mt-auto flex flex-col gap-2">
+        <div className="flex items-center justify-between" style={{ padding: '0 12px', fontSize: 12, color: 'var(--muted)' }}>
+          <span>Storage</span>
+          <button onClick={() => onNavigate('Settings')} style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}>Manage</button>
+        </div>
+        {/* shortcut: no disk-capacity backend yet, so no fill bar; add one with a total. */}
+        <div style={{ padding: '0 12px 8px', fontSize: 12, color: 'var(--text-faint)' }}>
+          {formatBytes(storage.used)} used · {storage.clips} {storage.clips === 1 ? 'clip' : 'clips'}
+        </div>
+        <Item target="Settings" label="Settings" icon="sliders" />
+      </div>
+    </nav>
   )
 }
 
@@ -528,12 +529,22 @@ export default function App() {
   return (
     <div className="relative" style={{ width: '100vw', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
       <TitleBar
-        view={view} setView={next => { setSharedClip(null); setView(next) }} overMedia={view === 'Feed' && !editingClip}
         isRecording={isRecording} onToggleRecording={toggleRecording}
         detectedGame={detectedGame} captureAvailable={captureAvailable}
-        hotkey={settings.hotkey} saveState={saveState}
+        hotkey={settings.hotkey} hotkeyShort={settings.hotkeyShort} saveState={saveState}
         onFeedback={() => setFeedbackOpen(true)}
       />
+      <Sidebar
+        storage={storage}
+        active={view === 'Library' ? (starredOnly ? 'Favorites' : 'Library') : view === 'Shared' ? null : view}
+        onNavigate={target => {
+          setSharedClip(null)
+          if (target === 'Favorites' || target === 'Library') { setStarredOnly(target === 'Favorites'); setView('Library') }
+          else setView(target)
+        }}
+      />
+      {/* Every screen renders inside this frame, right of the sidebar and under the title bar. */}
+      <div className="absolute" style={{ top: TITLE_HEIGHT, left: SIDEBAR_WIDTH, right: 0, bottom: 0, background: 'var(--bg-content)' }}>
 
       {update.status === 'ready' && !updateDismissed && (
         <div role="status" className="absolute flex items-center gap-3"
@@ -568,7 +579,7 @@ export default function App() {
 
       {/* Kept mounted while hidden so the scroll position survives a trip to
           the feed; hidden tiles fall out of view and release their decoders. */}
-      <main className="absolute inset-0 flex flex-col grain" style={{ top: 48, display: view === 'Library' ? 'flex' : 'none' }}>
+      <main className="absolute inset-0 flex flex-col grain" style={{ display: view === 'Library' ? 'flex' : 'none' }}>
         <LibraryView
           clips={shownClips}
           games={allGames} gameFilter={gameFilter} setGameFilter={setGameFilter}
@@ -601,7 +612,7 @@ export default function App() {
       </main>
 
       {view === 'Settings' && (
-        <main className="absolute inset-0 flex flex-col" style={{ top: 48 }}>
+        <main className="absolute inset-0 flex flex-col">
           <SettingsView
             previewClip={clips.filter(clip => clip.kind !== 'shot').sort((x, y) => y.createdAt - x.createdAt)[0]?.filePath}
             settings={settings} onChange={updateSettings} storage={storage} encoder={encoder}
@@ -621,6 +632,7 @@ export default function App() {
       )}
 
       {view === 'Shared' && sharedClip && <SharedClipView link={sharedClip} />}
+      </div>
 
       {editingClip && (
         <Editor clip={editingClip} onClose={() => setEditingClip(null)} />

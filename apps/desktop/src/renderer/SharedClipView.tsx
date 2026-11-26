@@ -27,7 +27,7 @@ export function SharedClipView({ link }: { link: SharedClipLink }) {
   }
 
   return (
-    <main className="absolute inset-x-0 bottom-0 grain" style={{ top: 48, background: 'var(--bg)' }}>
+    <main className="absolute inset-x-0 bottom-0 grain" style={{ top: 0, background: 'var(--bg)' }}>
       <div style={{ width: 'min(1120px, calc(100% - 96px))', height: '100%', margin: '0 auto', padding: '32px 0 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div>
           <div className="caps" style={{ color: 'var(--muted)', marginBottom: 8 }}>Shared clip</div>
