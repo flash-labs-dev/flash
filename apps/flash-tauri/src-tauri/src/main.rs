@@ -123,8 +123,6 @@ fn main() {
             // Start the replay buffer on launch, as the Electron build does, off the UI thread.
             let handle = app.handle().clone();
             std::thread::spawn(move || if let Err(e) = start_capture(&handle) { eprintln!("flash: capture failed to start: {e}") });
-            // Tell the UI where it is, as the Electron build does on load.
-            app.emit("navigate", ["feed"]).ok();
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![ipc])
