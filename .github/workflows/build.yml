@@ -53,13 +53,17 @@ jobs:
       - run: bash scripts/build-linux-media.sh
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @flash/capture run build
-      - name: Addon must link the bundled libav, not the distro's
+      - name: Addon must carry its own libav, hidden from Electron's libffmpeg.so
         run: |
-          needed="$(readelf -d packages/flash-capture/build/Release/flash_capture.node | grep NEEDED)"
-          echo "$needed"
-          for want in libavcodec.so.61 libavformat.so.61 libavutil.so.59 libswscale.so.8 libswresample.so.5; do
-            echo "$needed" | grep -q "\[$want\]" || { echo "addon does not need $want" >&2; exit 1; }
-          done
+          addon=packages/flash-capture/build/Release/flash_capture.node
+          readelf -d "$addon" | grep NEEDED
+          if readelf -d "$addon" | grep -E 'NEEDED.*lib(avcodec|avformat|avutil|swscale|swresample)\.so'; then
+            echo "addon links a shared libav; Electron's libffmpeg.so would intercept its calls" >&2; exit 1
+          fi
+          leaked="$(nm -D "$addon" | grep -E ' [TUWVBDR] (av[a-z]*|sws[a-z]*|swr[a-z]*)_' || true)"
+          if [ -n "$leaked" ]; then
+            echo "libav symbols are dynamic and can be interposed:" >&2; echo "$leaked" | head >&2; exit 1
+          fi
       - name: Build and run portable native checks
         run: |
           cmake --build packages/flash-capture/build --target flash_tests

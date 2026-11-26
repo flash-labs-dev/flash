@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# L1 build recipe, untested locally. Keep libav private so distro FFmpeg builds
-# cannot enable GPL components behind Flash's back. Nothing is statically linked.
+# Keep libav private so distro FFmpeg builds cannot enable GPL components behind
+# Flash's back. libav is built static and linked into flash_capture.node with its
+# symbols hidden: Electron's own libffmpeg.so exports the same av* names, and a
+# shared libav lost every call to it (segfault in CheckLibavLicense on launch).
+# OpenH264 stays a shared library.
 root="$(cd "$(dirname "$0")/.." && pwd)"
 prefix="$root/build/linux-media"
 work="$root/build/linux-media-source"
@@ -17,7 +20,7 @@ if [[ ! -d "$work/ffmpeg" ]]; then
 fi
 cd "$work/ffmpeg"
 ./configure --prefix="$prefix" --libdir="$prefix/lib" \
-  --disable-gpl --disable-nonfree --disable-static --enable-shared \
+  --disable-gpl --disable-nonfree --enable-static --disable-shared --enable-pic \
   --disable-autodetect --disable-everything --disable-programs --disable-doc \
   --disable-avdevice --disable-avfilter --disable-postproc --disable-network \
   --enable-avcodec --enable-avformat --enable-avutil --enable-swscale --enable-swresample \
@@ -26,7 +29,7 @@ cd "$work/ffmpeg"
   --enable-decoder=h264,aac --enable-parser=h264,aac \
   --enable-muxer=mp4 --enable-demuxer=mov --enable-protocol=file \
   --enable-bsf=extract_extradata,h264_mp4toannexb,aac_adtstoasc \
-  --enable-zlib --extra-ldflags='-Wl,-rpath,$ORIGIN'
+  --enable-zlib
 make -j"$(nproc)"
 make install
 if ! grep -q '^#define CONFIG_GPL 0$' config.h || ! grep -q '^#define CONFIG_NONFREE 0$' config.h; then
