@@ -18,7 +18,7 @@ import {
 /* THESIS: one clip owns the window and the next is one flick away; Flash
    refuses the dark-dashboard card grid every clipper ships.
    OWN-WORLD: near-black ground, white outlined glyphs, a soft bottom scrim,
-   tall condensed Antonio capitals for titles, tracked small caps for labels,
+   one plain Geist face for titles and text, tracked small caps for labels,
    and the theme accent only on live or engaged state.
    STORY: open Flash, the newest moment is already playing; flick through,
    star the keepers, edit or export one, find the rest in the library.
@@ -550,10 +550,13 @@ export default function App() {
     // Served over flash-clip, not file://. A renderer page on
     // http://localhost:5173 cannot load file:// media, so in development the
     // sound silently never played - and the empty catch below hid it.
+    // One preloaded element, rewound per save: a fresh Audio decoded on every
+    // save started late and cut off when two saves landed close together.
+    let clipSound: HTMLAudioElement | null = null
     unsubscribe.push(window.flash.onPlayClipSound((soundPath: string) => {
-      const audio = new Audio(clipUrl(soundPath))
-      audio.volume = 0.7
-      audio.play().catch(error => console.warn('Could not play the clip sound', error))
+      if (!clipSound) { clipSound = new Audio(clipUrl(soundPath)); clipSound.preload = 'auto'; clipSound.volume = 0.6 }
+      clipSound.currentTime = 0
+      clipSound.play().catch(error => console.warn('Could not play the clip sound', error))
     }))
 
     refreshClips()

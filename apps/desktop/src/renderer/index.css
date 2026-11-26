@@ -120,8 +120,8 @@
   /* "Live" green stays green on every theme; it is a status, not decoration. */
   --ok: #4ade80;
 
-  --font-display: 'Antonio Variable', 'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif;
-  --font-ui: 'Inter Variable', system-ui, sans-serif;
+  --font-ui: 'Geist Variable', system-ui, sans-serif;
+  --font-display: var(--font-ui);
 
   /* Redesign neutrals shared by every theme: content ground, chrome and panel
      dividers, and the two text steps between --fg and --muted. */
@@ -170,9 +170,8 @@ html, body {
 .display {
   font-family: var(--font-display);
   font-weight: 600;
-  text-transform: uppercase;
-  line-height: 0.92;
-  letter-spacing: -0.005em;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -547,4 +546,14 @@ html, body {
 .tile-pending { background: linear-gradient(110deg, var(--panel) 30%, var(--field) 50%, var(--panel) 70%); background-size: 220% 100%; animation: lane-shimmer 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .tile-still, .tile-live, .tile-pending { animation: none; }
+}
+
+/* Library search: grows while in use, so long game names fit. */
+.search-field {
+  width: 180px;
+  transition: width 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.search-field:focus,
+.search-field:not(:placeholder-shown) {
+  width: 320px;
 }

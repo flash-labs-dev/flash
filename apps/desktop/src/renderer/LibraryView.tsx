@@ -144,8 +144,8 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
                 onQueryChange('')
                 event.currentTarget.blur()
               }}
-              className="field"
-              style={{ width: 180, paddingLeft: 32, height: 32 }}
+              className="field search-field"
+              style={{ paddingLeft: 32, height: 32 }}
             />
           </label>
         </div>

@@ -503,16 +503,16 @@ function resource(packaged: string, repoRelative: string): string {
 // The toast and overlay are separate windows loaded from data URLs, so they
 // cannot reach the renderer's bundled font; embed it once, read from assets
 // (which ship with the app), and degrade to the fallback stack if it is gone.
-let antonioDataUrl: string | null = null
-function antonioFont(): string {
-  if (antonioDataUrl !== null) return antonioDataUrl
+let uiFontDataUrl: string | null = null
+function uiFont(): string {
+  if (uiFontDataUrl !== null) return uiFontDataUrl
   try {
-    antonioDataUrl = 'data:font/woff2;base64,' + readFileSync(resource('assets/fonts/antonio.woff2', 'assets/fonts/antonio.woff2')).toString('base64')
+    uiFontDataUrl = 'data:font/woff2;base64,' + readFileSync(resource('assets/fonts/geist.woff2', 'assets/fonts/geist.woff2')).toString('base64')
   } catch (error) {
-    console.warn('Could not load the display font for the toast', error)
-    antonioDataUrl = ''
+    console.warn('Could not load the UI font for the toast', error)
+    uiFontDataUrl = ''
   }
-  return antonioDataUrl
+  return uiFontDataUrl
 }
 
 function loadCaptureAddon(): CaptureAddon | null {
@@ -1200,7 +1200,7 @@ function showClipNotification(durationSeconds: number) {
   }
 
   const notification = new BrowserWindow({
-    ...cornerBounds(captureDisplay().workArea, settings.overlayPosition, 280, 72),
+    ...cornerBounds(captureDisplay().workArea, settings.overlayPosition, 280, 64),
     frame: false, transparent: true, alwaysOnTop: true,
     skipTaskbar: true, resizable: false, focusable: false, show: false,
     type: 'toolbar', hasShadow: false,
@@ -1210,7 +1210,7 @@ function showClipNotification(durationSeconds: number) {
   notification.setAlwaysOnTop(true, 'screen-saver')
   notification.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   notification.setIgnoreMouseEvents(true, { forward: true })
-  const html = toastHtml(settings.theme, antonioFont(), durationSeconds)
+  const html = toastHtml(settings.theme, uiFont(), durationSeconds)
   notification.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   let timer: ReturnType<typeof setTimeout> | undefined
   notification.once('closed', () => {
@@ -1221,7 +1221,12 @@ function showClipNotification(durationSeconds: number) {
   notification.once('ready-to-show', () => {
     if (notification.isDestroyed()) return
     notification.showInactive()
-    timer = setTimeout(() => { if (!notification.isDestroyed()) notification.close() }, 3200)
+    // Play the exit animation, then close; the 240 ms matches .toast.out in windowTemplates.
+    timer = setTimeout(() => {
+      if (notification.isDestroyed()) return
+      notification.webContents.executeJavaScript('window.leave()').catch(() => {})
+      timer = setTimeout(() => { if (!notification.isDestroyed()) notification.close() }, 240)
+    }, 3000)
   })
 }
 
@@ -1258,7 +1263,7 @@ function createOverlay() {
   overlayWindow.setIgnoreMouseEvents(true, { forward: true })
 
   const overlay = overlayWindow
-  const html = overlayHtml(settings.theme, antonioFont())
+  const html = overlayHtml(settings.theme, uiFont())
   overlay.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   overlay.once('ready-to-show', () => {
     if (overlay.isDestroyed() || overlayWindow !== overlay) return
