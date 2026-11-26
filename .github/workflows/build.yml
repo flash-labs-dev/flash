@@ -60,7 +60,7 @@ jobs:
           if readelf -d "$addon" | grep -E 'NEEDED.*lib(avcodec|avformat|avutil|swscale|swresample)\.so'; then
             echo "addon links a shared libav; Electron's libffmpeg.so would intercept its calls" >&2; exit 1
           fi
-          leaked="$(nm -D "$addon" | grep -E ' [TUW] (av|avcodec|avformat|avio|sws|swr)_' || true)"
+          leaked="$(nm -D "$addon" | grep -E ' [TUWVBDR] (av[a-z]*|sws[a-z]*|swr[a-z]*)_' || true)"
           if [ -n "$leaked" ]; then
             echo "libav symbols are dynamic and can be interposed:" >&2; echo "$leaked" | head >&2; exit 1
           fi
