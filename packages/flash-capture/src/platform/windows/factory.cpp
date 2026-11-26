@@ -38,4 +38,5 @@ std::unique_ptr<ProcessLister> CreateProcessLister() { return std::make_unique<W
 std::vector<DisplayInfo> ListPlatformDisplays() { return ScreenCapture::ListDisplays(); }
 bool PlatformSupportsPerAppAudio() { return AudioCapture::ProcessLoopbackAvailable(); }
 void SetPortalRestoreToken(const std::string&, std::function<void(const std::string&)>) {}
+void SetCaptureWindowPid(uint32_t) {}
 } // namespace flash

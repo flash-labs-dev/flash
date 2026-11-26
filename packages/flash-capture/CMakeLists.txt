@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(flash_capture LANGUAGES CXX)
+project(flash_capture LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -50,7 +50,23 @@ if(WIN32)
 
 elseif(UNIX AND NOT APPLE)
   find_package(PkgConfig REQUIRED)
-  pkg_check_modules(LINUX_MEDIA REQUIRED IMPORTED_TARGET libpipewire-0.3 gio-2.0 gio-unix-2.0)
+  pkg_check_modules(LINUX_MEDIA REQUIRED IMPORTED_TARGET libpipewire-0.3 gio-2.0 gio-unix-2.0 wayland-client)
+  # KWin's private screencast and window-management protocols (KDE Plasma only).
+  pkg_get_variable(WAYLAND_SCANNER wayland-scanner wayland_scanner)
+  if(NOT WAYLAND_SCANNER)
+    find_program(WAYLAND_SCANNER wayland-scanner REQUIRED)
+  endif()
+  set(KDE_PROTOCOL_DIR ${CMAKE_CURRENT_SOURCE_DIR}/third_party/plasma-wayland-protocols)
+  set(KDE_PROTOCOL_SOURCES "")
+  foreach(protocol zkde-screencast-unstable-v1 plasma-window-management)
+    add_custom_command(
+      OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/${protocol}-client.h ${CMAKE_CURRENT_BINARY_DIR}/${protocol}.c
+      COMMAND ${WAYLAND_SCANNER} client-header ${KDE_PROTOCOL_DIR}/${protocol}.xml ${CMAKE_CURRENT_BINARY_DIR}/${protocol}-client.h
+      COMMAND ${WAYLAND_SCANNER} private-code ${KDE_PROTOCOL_DIR}/${protocol}.xml ${CMAKE_CURRENT_BINARY_DIR}/${protocol}.c
+      DEPENDS ${KDE_PROTOCOL_DIR}/${protocol}.xml)
+    list(APPEND KDE_PROTOCOL_SOURCES ${CMAKE_CURRENT_BINARY_DIR}/${protocol}.c ${CMAKE_CURRENT_BINARY_DIR}/${protocol}-client.h)
+  endforeach()
+  include_directories(${CMAKE_CURRENT_BINARY_DIR})
   find_package(Threads REQUIRED)
   set(PLATFORM_LIBS PkgConfig::LINUX_MEDIA Threads::Threads)
 
@@ -82,10 +98,10 @@ elseif(UNIX AND NOT APPLE)
     list(APPEND PLATFORM_LIBS PkgConfig::LINUX_AV)
   endif()
   file(GLOB LINUX_SOURCES CONFIGURE_DEPENDS src/platform/linux/*.cpp)
-  set(CAPTURE_SOURCES src/binding.cpp src/core/ring_buffer.cpp ${LINUX_SOURCES})
+  set(CAPTURE_SOURCES src/binding.cpp src/core/ring_buffer.cpp ${LINUX_SOURCES} ${KDE_PROTOCOL_SOURCES})
   # The same engine as a static library with a C API, for the Rust/Tauri build.
   # Not built by default: cargo builds it through apps/flash-tauri/src-tauri/build.rs.
-  add_library(flash_engine STATIC EXCLUDE_FROM_ALL src/engine_capi.cpp src/core/ring_buffer.cpp ${LINUX_SOURCES})
+  add_library(flash_engine STATIC EXCLUDE_FROM_ALL src/engine_capi.cpp src/core/ring_buffer.cpp ${LINUX_SOURCES} ${KDE_PROTOCOL_SOURCES})
   target_link_libraries(flash_engine PUBLIC ${PLATFORM_LIBS})
 else()
   message(FATAL_ERROR "Flash capture supports Windows and Linux only")

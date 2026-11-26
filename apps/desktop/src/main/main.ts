@@ -67,6 +67,8 @@ const DEFAULTS = {
   voiceRawFloor: 0.30,
   voiceCooldownMs: 3000,
   displayId: 0,
+  // 'game' records only the detected game's window (KDE Plasma for now), else the display.
+  captureMode: 'game' as 'game' | 'screen',
   overlay: !(process.platform === 'linux' && process.env.XDG_SESSION_TYPE === 'wayland'),
   portalRestoreToken: '',
   overlayPosition: 'top-left' as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right',
@@ -353,6 +355,8 @@ type CaptureAddon = {
   setQuality?(options: { height: number; fps: number; bitrateKbps: number }): void
   listDisplays?(): Display[]
   setDisplay?(id: number): void
+  // Record this process's window instead of the display; 0 goes back to the display.
+  setCaptureWindow?(pid: number): void
   // All three recorded tracks at once. The engine keeps them separate so the
   // editor can mix them; this is the blanket on/off.
   setAudioTracks?(tracks: Record<AudioTrackId, boolean>): void
@@ -1133,12 +1137,18 @@ function startGameDetection() {
         try { captureAddon?.setCurrentGame('', 0) }
         catch (error) { console.warn('Could not clear game audio target', error) }
       }
+      applyCaptureWindow()
       mainWindow?.webContents.send('game-detected', currentGame)
       updateOverlay()
     }
   }
   poll()
   gameDetectorInterval = setInterval(poll, 3000)
+}
+
+function applyCaptureWindow() {
+  try { captureAddon?.setCaptureWindow?.(settings.captureMode === 'game' ? currentGamePid : 0) }
+  catch (error) { console.warn('Could not set the capture window', error) }
 }
 
 function stopGameDetection() {
@@ -1722,6 +1732,7 @@ function setupIPC() {
     if (changed.voicePhrase !== undefined) applyVoicePhrases()
     if (changed.voiceRawFloor !== undefined || changed.voiceCooldownMs !== undefined) applyVoiceThreshold()
     if (changed.voiceEnabled !== undefined) applyVoiceEnabled()
+    if (changed.captureMode !== undefined) applyCaptureWindow()
     if (changed.displayId !== undefined) {
       try { captureAddon?.setDisplay?.(changed.displayId); sessionDisplayId = null }
       catch (error) { settings.displayId = previousDisplay; saveSettings(); console.warn('Could not switch display', error) }
