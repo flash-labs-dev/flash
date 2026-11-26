@@ -22,6 +22,7 @@ export interface Settings {
   voiceRawFloor: number
   voiceCooldownMs: number
   displayId: number
+  captureMode: 'game' | 'screen'
   overlay: boolean
   overlayPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
   quality: string
@@ -533,6 +534,19 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
                 min={5} max={Math.max(5, settings.bufferLength)} step={5} suffix="s"
                 onChange={shortClipSeconds => onChange({ shortClipSeconds })} />
             </Row>
+            {window.flash.platform === 'linux' && (
+              <Row label="Record" hint="Game window only follows the detected game on KDE Plasma, and records the display below until a game starts.">
+                <Dropdown
+                  value={settings.captureMode}
+                  onChange={captureMode => onChange({ captureMode })}
+                  width={230}
+                  options={[
+                    { value: 'game', label: 'Game window only' },
+                    { value: 'screen', label: 'Full screen' },
+                  ]}
+                />
+              </Row>
+            )}
             {displays.length > 1 && (
               <Row label="Capture display">
                 <Dropdown

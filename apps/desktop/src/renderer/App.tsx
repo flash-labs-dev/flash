@@ -187,7 +187,7 @@ export default function App() {
   const [storage, setStorage] = useState({ used: 0, clips: 0 })
   const [settings, setSettings] = useState<Settings>({
     clipsFolder: '', theme: DEFAULT_THEME, hotkey: 'F8', hotkeyShort: 'Shift+F8', screenshotHotkey: 'F9',
-    shortClipSeconds: 15, displayId: 0, overlay: true, overlayPosition: 'top-left',
+    shortClipSeconds: 15, displayId: 0, captureMode: 'game', overlay: true, overlayPosition: 'top-left',
     voiceEnabled: false, voicePhrase: '', voiceRawFloor: 0.5, voiceCooldownMs: 3000,
     quality: '1080p 60fps', bufferLength: 30,
     audioCapture: true, audioLanes: DEFAULT_AUDIO_LANES, micDeviceId: '', autoSave: true, notifications: true, autoDeleteDays: 0,

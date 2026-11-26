@@ -113,3 +113,7 @@ assert.deepEqual(sanitise(collections, {
   ignoredGames: ['ignore.exe', null, {}, 42, '', 'ignore.exe'],
 }), { learnedGames: { 'game.exe': 'Game' }, ignoredGames: ['ignore.exe'] })
 console.log('PASS: display IDs and learned/ignored collection contents validated')
+
+// captureMode accepts only the two modes the settings page offers.
+for (const captureMode of ['game', 'screen']) assert.equal(sanitise({ captureMode: 'game' }, { captureMode }).captureMode, captureMode)
+for (const captureMode of ['window', '', null, 1]) assert.deepEqual(sanitise({ captureMode: 'game' }, { captureMode }), {})

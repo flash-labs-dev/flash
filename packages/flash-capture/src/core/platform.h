@@ -31,6 +31,9 @@ std::unique_ptr<ProcessLister> CreateProcessLister();
 std::vector<DisplayInfo> ListPlatformDisplays();
 // Whether desktop sound can be captured one app at a time on this machine.
 bool PlatformSupportsPerAppAudio();
+// Record this process's window instead of the chosen display (0 = the display).
+// KDE Plasma only for now; elsewhere it is ignored and the display is recorded.
+void SetCaptureWindowPid(uint32_t pid);
 // Tokens restore permission only. JavaScript owns persistence in userData.
 void SetPortalRestoreToken(const std::string&, std::function<void(const std::string&)>);
 } // namespace flash

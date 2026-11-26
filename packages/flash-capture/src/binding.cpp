@@ -569,6 +569,16 @@ Napi::Value SetQuality(const Napi::CallbackInfo& info) {
 Napi::Value ListDisplays(const Napi::CallbackInfo& info) { auto result = Napi::Array::New(info.Env()); uint32_t i = 0; for (const auto& d : ListPlatformDisplays()) { auto value = Napi::Object::New(info.Env()); value.Set("id", d.id); value.Set("name", d.name); value.Set("width", d.width); value.Set("height", d.height); value.Set("isPrimary", d.isPrimary); value.Set("refreshHz", d.refreshHz); value.Set("x", d.x); value.Set("y", d.y); result.Set(i++, value); } return result; }
 Napi::Value SetDisplay(const Napi::CallbackInfo& info) { if (!info.Length() || !info[0].IsNumber()) { Napi::TypeError::New(info.Env(), "display id must be a number").ThrowAsJavaScriptException(); return info.Env().Undefined(); } uint32_t id = info[0].As<Napi::Number>().Uint32Value(); if (id >= ListPlatformDisplays().size()) { Napi::RangeError::New(info.Env(), "display id does not exist").ThrowAsJavaScriptException(); return info.Env().Undefined(); } bool running; { std::lock_guard lock(stateMutex); running = screenCapture && screenCapture->IsCapturing(); } StopCapture(); { std::lock_guard lock(stateMutex); previousVideo = ringBuffer ? ringBuffer->Flush() : std::vector<EncodedPacket>{}; previousAudio.assign(audioBuffer.begin(), audioBuffer.end()); previousWidth = encodeWidth; previousHeight = encodeHeight; previousFps = quality.fps; awaitingFirstKeyframe = running && !previousVideo.empty(); } uint32_t previous = displayId; displayId = id; if (!BuildPipeline(false)) { displayId = previous; BuildPipeline(false); if (running) StartCaptureThreads(); Napi::Error::New(info.Env(), "failed to switch display").ThrowAsJavaScriptException(); return info.Env().Undefined(); } if (running && !StartCaptureThreads()) Napi::Error::New(info.Env(), "display switched but capture restart failed").ThrowAsJavaScriptException(); return info.Env().Undefined(); }
 
+// Record a process's window instead of the display (0 = back to the display).
+Napi::Value SetCaptureWindow(const Napi::CallbackInfo& info) {
+    if (!info.Length() || !info[0].IsNumber()) {
+        Napi::TypeError::New(info.Env(), "capture window pid must be a number").ThrowAsJavaScriptException();
+        return info.Env().Undefined();
+    }
+    SetCaptureWindowPid(info[0].As<Napi::Number>().Uint32Value());
+    return info.Env().Undefined();
+}
+
 Napi::Value SetVoiceEnabled(const Napi::CallbackInfo& info) {
     if (!info.Length() || !info[0].IsBoolean()) {
         Napi::TypeError::New(info.Env(), "voice enabled must be a boolean")
@@ -940,6 +950,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("initialize", Napi::Function::New(env, Invoke<&AddonState::Initialize>, "Initialize", this)); exports.Set("startReplayBuffer", Napi::Function::New(env, Invoke<&AddonState::StartReplayBuffer>, "StartReplayBuffer", this)); exports.Set("stopReplayBuffer", Napi::Function::New(env, Invoke<&AddonState::StopReplayBuffer>, "StopReplayBuffer", this));
     exports.Set("saveClip", Napi::Function::New(env, Invoke<&AddonState::SaveClip>, "SaveClip", this)); exports.Set("trimClip", Napi::Function::New(env, Invoke<&AddonState::TrimClipAsync>, "TrimClipAsync", this)); exports.Set("getStatus", Napi::Function::New(env, Invoke<&AddonState::GetStatus>, "GetStatus", this)); exports.Set("setCurrentGame", Napi::Function::New(env, Invoke<&AddonState::SetCurrentGame>, "SetCurrentGame", this)); exports.Set("setBufferLength", Napi::Function::New(env, Invoke<&AddonState::SetBufferLength>, "SetBufferLength", this)); exports.Set("exportClip", Napi::Function::New(env, Invoke<&AddonState::ExportClipBinding>, "ExportClipBinding", this)); exports.Set("setClipsDir", Napi::Function::New(env, Invoke<&AddonState::SetClipsDir>, "SetClipsDir", this));
     exports.Set("setQuality", Napi::Function::New(env, Invoke<&AddonState::SetQuality>, "SetQuality", this)); exports.Set("listDisplays", Napi::Function::New(env, Invoke<&AddonState::ListDisplays>, "ListDisplays", this)); exports.Set("setDisplay", Napi::Function::New(env, Invoke<&AddonState::SetDisplay>, "SetDisplay", this)); exports.Set("setAudioTracks", Napi::Function::New(env, Invoke<&AddonState::SetAudioTracks>, "SetAudioTracks", this));
+    exports.Set("setCaptureWindow", Napi::Function::New(env, Invoke<&AddonState::SetCaptureWindow>, "SetCaptureWindow", this));
     exports.Set("setAudioLanes", Napi::Function::New(env, Invoke<&AddonState::SetAudioLanes>, "SetAudioLanes", this));
     exports.Set("listCaptureDevices", Napi::Function::New(env, Invoke<&AddonState::ListCaptureDevices>, "ListCaptureDevices", this));
     exports.Set("setCaptureDevice", Napi::Function::New(env, Invoke<&AddonState::SetCaptureDevice>, "SetCaptureDevice", this));
