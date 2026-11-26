@@ -69,8 +69,24 @@ function WindowControls() {
 const TITLE_HEIGHT = 56
 const SIDEBAR_WIDTH = 232
 
-function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailable, hotkey, hotkeyShort, saveState, onFeedback }: {
+// "Shift+F8" -> separate chips, as the spec draws key combos.
+function KeyChips({ combo }: { combo: string }) {
+  return <span className="flex items-center gap-1">{combo.split('+').map(key => <kbd key={key} className="chip-key">{key}</kbd>)}</span>
+}
+
+function IconButton({ label, icon, onClick, disabled }: { label: string; icon: React.ComponentProps<typeof Icon>['name']; onClick?: () => void; disabled?: boolean }) {
+  return (
+    <button aria-label={label} title={disabled ? `${label}: not available yet` : label} onClick={onClick} disabled={disabled}
+      className="flex items-center justify-center titlebar-no-drag"
+      style={{ width: 40, height: 40, borderRadius: 6, color: 'var(--text-faint)', cursor: disabled ? 'default' : 'pointer', opacity: disabled ? 0.6 : 1 }}>
+      <Icon name={icon} />
+    </button>
+  )
+}
+
+function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailable, hotkey, hotkeyShort, saveState, onSearch, onFeedback }: {
   onFeedback: () => void
+  onSearch: () => void
   isRecording: boolean
   onToggleRecording: () => void
   detectedGame: string | null
@@ -82,41 +98,44 @@ function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailab
   const live = captureAvailable && isRecording
   return (
     <header className="absolute inset-x-0 top-0 z-30 flex items-center gap-4 titlebar-drag"
-      style={{ height: TITLE_HEIGHT, padding: '0 0 0 20px', background: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
-      <div className="flex items-center gap-2" style={{ width: SIDEBAR_WIDTH - 36 }}>
+      style={{ height: TITLE_HEIGHT, padding: '0 0 0 16px', background: 'var(--bg)', borderBottom: '1px solid var(--border)' }}>
+      <div className="flex items-center gap-2" style={{ width: SIDEBAR_WIDTH - 32 }}>
         <span style={{ color: 'var(--fg)', display: 'flex' }}><BoltLogo size={20} /></span>
         <span style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>Flash</span>
       </div>
 
-      {/* Status pill: the button that starts and stops the replay buffer. */}
+      {/* Status pill: also the button that starts and stops the replay buffer. */}
       <button onClick={onToggleRecording} disabled={!captureAvailable} aria-pressed={live}
         className="flex items-center gap-2 titlebar-no-drag"
         title={captureAvailable ? (live ? 'Replay buffer is running. Click to stop.' : 'Start the replay buffer') : 'Capture engine unavailable'}
         style={{
-          height: 32, padding: '0 14px', borderRadius: 999, fontSize: 13, fontWeight: 500,
-          color: live ? 'var(--fg)' : 'var(--muted)', background: 'var(--field)', border: '1px solid var(--edge)',
-          cursor: captureAvailable ? 'pointer' : 'not-allowed',
+          height: 30, padding: '0 12px', borderRadius: 999, fontSize: 13, fontWeight: 500,
+          color: live ? 'var(--fg)' : 'var(--text-secondary)', background: 'var(--field)', border: '1px solid var(--edge)',
+          cursor: captureAvailable ? 'pointer' : 'default',
         }}>
         {live ? <>Buffering{detectedGame && <span style={{ color: 'var(--muted)' }}>{detectedGame}</span>}</> : 'Not recording'}
       </button>
 
-      <div className="flex items-center gap-4" style={{ fontSize: 12, color: 'var(--muted)' }}>
-        <span className="flex items-center gap-2"><kbd className="keycap">{hotkey}</kbd>Save clip</span>
-        {hotkeyShort && <span className="flex items-center gap-2"><kbd className="keycap">{hotkeyShort}</kbd>Short clip</span>}
+      <div className="flex items-center gap-4" style={{ fontSize: 13, color: 'var(--muted)' }}>
+        <span className="flex items-center gap-2"><KeyChips combo={hotkey} />Save clip</span>
+        {hotkeyShort && <span className="flex items-center gap-2"><KeyChips combo={hotkeyShort} />Short clip</span>}
       </div>
 
-      <div className="ml-auto flex items-center gap-4 titlebar-no-drag">
-        {saveState.saving && (
-          <span role="status" style={{ fontSize: 13, color: 'var(--fg)' }}>Saving clip</span>
-        )}
+      <div className="ml-auto flex items-center titlebar-no-drag">
+        {saveState.saving && <span role="status" style={{ fontSize: 13, color: 'var(--fg)', marginRight: 12 }}>Saving clip</span>}
         {saveState.error && !saveState.saving && (
           <span role="alert" title={saveState.error}
-            style={{ fontSize: 12, color: 'var(--alert)', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            style={{ fontSize: 12, color: 'var(--alert)', maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginRight: 12 }}>
             {saveState.error}
           </span>
         )}
-        <button onClick={onFeedback} className="btn btn-sm btn-ghost"
+        <button onClick={onFeedback} className="titlebar-no-drag" style={{ fontSize: 13, color: 'var(--text-faint)', padding: '0 10px', height: 40, cursor: 'pointer' }}
           title="Tell us what's broken or what you want. We read every message.">Feedback</button>
+        <IconButton label="Search clips" icon="search" onClick={onSearch} />
+        {/* TODO: notifications and accounts have no backend yet. */}
+        <IconButton label="Notifications" icon="bell" disabled />
+        <IconButton label="Account" icon="user" disabled />
+        <span aria-hidden="true" style={{ width: 1, height: 20, background: 'var(--edge)', margin: '0 8px' }} />
         <WindowControls />
       </div>
     </header>
@@ -125,50 +144,69 @@ function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailab
 
 // ── Sidebar ───────────────────────────────────────────────────────────────────
 
-type NavTarget = 'Feed' | 'Library' | 'Favorites' | 'Settings'
+export type NavTarget = 'Library' | 'Games' | 'Favorites' | 'Screenshots' | 'Recordings' | 'Trash' | 'Settings'
 
 function Sidebar({ active, onNavigate, storage }: {
   active: NavTarget | null
   onNavigate: (target: NavTarget) => void
-  storage: { used: number; clips: number }
+  storage: { used: number; clips: number; total?: number }
 }) {
-  const Item = ({ target, label, icon }: { target: NavTarget; label: string; icon: React.ComponentProps<typeof Icon>['name'] }) => (
+  const Item = ({ target, icon }: { target: NavTarget; icon: React.ComponentProps<typeof Icon>['name'] }) => (
     <button onClick={() => onNavigate(target)} aria-current={active === target ? 'page' : undefined}
       className="flex items-center gap-3 w-full"
       style={{
-        height: 40, padding: '0 12px', borderRadius: 6, fontSize: 14, fontWeight: 500, cursor: 'pointer',
-        color: active === target ? 'var(--fg)' : 'var(--text-faint)',
+        height: 36, padding: '0 10px', borderRadius: 6, fontSize: 14, fontWeight: 500, cursor: 'pointer',
+        color: active === target ? 'var(--fg)' : 'var(--text-secondary)',
         background: active === target ? 'var(--hover)' : 'transparent',
       }}>
-      <Icon name={icon} />{label}
+      <span style={{ display: 'flex', color: active === target ? 'var(--fg)' : 'var(--text-faint)' }}><Icon name={icon} size={18} /></span>{target}
     </button>
   )
   return (
-    <nav aria-label="Main" className="absolute left-0 bottom-0 flex flex-col"
-      style={{ top: TITLE_HEIGHT, width: SIDEBAR_WIDTH, padding: 12, background: 'var(--bg)', borderRight: '1px solid var(--border)' }}>
-      <Item target="Feed" label="Watch" icon="play" />
-      <Item target="Library" label="Library" icon="grid" />
-      <Item target="Favorites" label="Favorites" icon="star" />
-      <div className="mt-auto flex flex-col gap-2">
-        <div className="flex items-center justify-between" style={{ padding: '0 12px', fontSize: 12, color: 'var(--muted)' }}>
-          <span>Storage</span>
-          <button onClick={() => onNavigate('Settings')} style={{ color: 'var(--text-secondary)', cursor: 'pointer' }}>Manage</button>
-        </div>
-        {/* shortcut: no disk-capacity backend yet, so no fill bar; add one with a total. */}
-        <div style={{ padding: '0 12px 8px', fontSize: 12, color: 'var(--text-faint)' }}>
-          {formatBytes(storage.used)} used · {storage.clips} {storage.clips === 1 ? 'clip' : 'clips'}
-        </div>
-        <Item target="Settings" label="Settings" icon="sliders" />
+    <nav aria-label="Main" className="absolute left-0 bottom-0 flex flex-col gap-0.5"
+      style={{ top: TITLE_HEIGHT, width: SIDEBAR_WIDTH, padding: '10px 10px 12px', background: 'var(--bg)', borderRight: '1px solid var(--border)' }}>
+      <Item target="Library" icon="grid" />
+      <Item target="Games" icon="gamepad" />
+      <Item target="Favorites" icon="star" />
+      <Item target="Screenshots" icon="camera" />
+      <Item target="Recordings" icon="video" />
+      <Item target="Trash" icon="trash" />
+      <div className="flex items-center justify-between" style={{ padding: '16px 6px 4px 10px', fontSize: 12, fontWeight: 500, color: 'var(--text-faint)' }}>
+        Albums
+        {/* TODO: albums have no backend yet. */}
+        <IconButton label="New album" icon="plus" disabled />
       </div>
+      <div className="mt-auto flex flex-col gap-2" style={{ padding: '0 10px 10px' }}>
+        <div className="flex items-center justify-between" style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)' }}>
+          Storage
+          <button onClick={() => onNavigate('Settings')} style={{ fontSize: 12, color: 'var(--muted)', textDecoration: 'underline', cursor: 'pointer' }}>Manage</button>
+        </div>
+        {storage.total ? (
+          <div role="meter" aria-label="Storage used" aria-valuemin={0} aria-valuemax={storage.total} aria-valuenow={storage.used}
+            style={{ height: 6, borderRadius: 3, background: 'var(--field)' }}>
+            <div style={{ height: 6, borderRadius: 3, background: 'var(--fg)', width: `${Math.min(100, storage.used / storage.total * 100)}%` }} />
+          </div>
+        ) : null /* TODO: the main process does not report disk capacity yet, so no fill bar. */}
+        <div style={{ fontSize: 12, color: 'var(--muted)' }}>
+          {formatBytes(storage.used)}{storage.total ? ` of ${formatBytes(storage.total)}` : ''} used
+        </div>
+      </div>
+      <Item target="Settings" icon="settings" />
     </nav>
   )
+}
+
+function PageTitle({ children }: { children: React.ReactNode }) {
+  return <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--fg)', padding: '20px 24px 0' }}>{children}</h1>
 }
 
 // ── Root App ──────────────────────────────────────────────────────────────────
 
 export default function App() {
   usePlaybackVisibility()
-  const [view, setView] = useState<View>('Feed')
+  const [view, setView] = useState<View>('Library')
+  // Which sidebar page the Library view shows, and the two pages that are not clip grids.
+  const [page, setPage] = useState<'Library' | 'Favorites' | 'Screenshots' | 'Recordings' | 'Games' | 'Trash'>('Library')
   const [sharedClip, setSharedClip] = useState<SharedClipLink | null>(null)
   const [gameFilter, setGameFilter] = useState('All')
   const [starredOnly, setStarredOnly] = useState(false)
@@ -325,9 +363,11 @@ export default function App() {
   const shownClips = useMemo(() => {
     const byGame = gameFilter === 'All' ? clips : clips.filter(c => c.game === gameFilter)
     const byStar = starredOnly ? byGame.filter(c => c.starred) : byGame
-    const byQuery = clipQuery ? byStar.filter(clip => matchesQuery(clip, clipQuery)) : byStar
+    // shortcut: clips only come as 'clip' or 'shot' today, so Recordings is always empty until long recordings exist.
+    const byKind = page === 'Screenshots' ? byStar.filter(c => c.kind === 'shot') : page === 'Recordings' ? [] : byStar
+    const byQuery = clipQuery ? byKind.filter(clip => matchesQuery(clip, clipQuery)) : byKind
     return sortClips(byQuery, sort)
-  }, [clips, gameFilter, starredOnly, clipQuery, sort])
+  }, [clips, gameFilter, starredOnly, clipQuery, sort, page])
   const filtered = gameFilter !== 'All' || starredOnly || clipQuery !== ''
   const filterLabel = [
     gameFilter === 'All' ? 'All games' : gameFilter,
@@ -520,11 +560,6 @@ export default function App() {
     return () => { unsubscribe.forEach(remove => remove()) }
   }, [refreshClips])
 
-  const emptyHint = !captureAvailable
-    ? 'The capture engine is unavailable. Check that the native addon is built.'
-    : isRecording
-      ? <>Flash is holding the last {settings.bufferLength} seconds. Press <span className="keycap" style={{ color: 'var(--fg)' }}>{settings.hotkey}</span> in game to keep them.</>
-      : <>Start the replay buffer from the Idle button above, then press <span className="keycap" style={{ color: 'var(--fg)' }}>{settings.hotkey}</span> in game.</>
 
   return (
     <div className="relative" style={{ width: '100vw', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
@@ -533,14 +568,19 @@ export default function App() {
         detectedGame={detectedGame} captureAvailable={captureAvailable}
         hotkey={settings.hotkey} hotkeyShort={settings.hotkeyShort} saveState={saveState}
         onFeedback={() => setFeedbackOpen(true)}
+        onSearch={() => {
+          setSharedClip(null); setView('Library')
+          // The Library focuses its search box on "/" once it is showing.
+          requestAnimationFrame(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '/' })))
+        }}
       />
       <Sidebar
         storage={storage}
-        active={view === 'Library' ? (starredOnly ? 'Favorites' : 'Library') : view === 'Shared' ? null : view}
+        active={view === 'Library' ? page : view === 'Settings' ? 'Settings' : null}
         onNavigate={target => {
           setSharedClip(null)
-          if (target === 'Favorites' || target === 'Library') { setStarredOnly(target === 'Favorites'); setView('Library') }
-          else setView(target)
+          if (target === 'Settings') { setView('Settings'); return }
+          setPage(target); setStarredOnly(target === 'Favorites'); setView('Library')
         }}
       />
       {/* Every screen renders inside this frame, right of the sidebar and under the title bar. */}
@@ -579,8 +619,35 @@ export default function App() {
 
       {/* Kept mounted while hidden so the scroll position survives a trip to
           the feed; hidden tiles fall out of view and release their decoders. */}
-      <main className="absolute inset-0 flex flex-col grain" style={{ display: view === 'Library' ? 'flex' : 'none' }}>
+      {view === 'Library' && page === 'Games' && (
+        <main className="absolute inset-0 overflow-y-auto">
+          <PageTitle>Games</PageTitle>
+          {games.length === 0
+            ? <p style={{ padding: '12px 24px', fontSize: 13, color: 'var(--muted)' }}>Games appear here once you save a clip in one.</p>
+            : <ul style={{ padding: '16px 24px' }}>{games.map(game => (
+                <li key={game.name}>
+                  <button className="flex items-center justify-between w-full" style={{ height: 40, padding: '0 12px', borderRadius: 6, fontSize: 14, cursor: 'pointer' }}
+                    onClick={() => { setGameFilter(game.name); setPage('Library') }}>
+                    {game.name}<span style={{ fontSize: 12, color: 'var(--muted)' }}>{game.count} {game.count === 1 ? 'clip' : 'clips'}</span>
+                  </button>
+                </li>))}
+              </ul>}
+        </main>
+      )}
+      {view === 'Library' && page === 'Trash' && (
+        <main className="absolute inset-0">
+          <PageTitle>Trash</PageTitle>
+          {/* TODO: deleting is permanent today; a real Trash needs a soft-delete backend. */}
+          <p style={{ padding: '12px 24px', fontSize: 13, color: 'var(--muted)' }}>Trash is empty. Deleted clips are removed right away.</p>
+        </main>
+      )}
+      <main className="absolute inset-0 flex flex-col" style={{ display: view === 'Library' && page !== 'Games' && page !== 'Trash' ? 'flex' : 'none' }}>
         <LibraryView
+          title={page}
+          captureAvailable={captureAvailable}
+          onRetry={toggleRecording}
+          hotkey={settings.hotkey} bufferLength={settings.bufferLength}
+          onSetupHotkeys={() => setView('Settings')}
           clips={shownClips}
           games={allGames} gameFilter={gameFilter} setGameFilter={setGameFilter}
           starredOnly={starredOnly} setStarredOnly={setStarredOnly}
@@ -598,7 +665,6 @@ export default function App() {
           onDeleteClip={deleteClip}
           onStarClip={starClip}
           suspendThumbnails={editingClip !== null}
-          emptyHint={emptyHint}
         />
         {selectedClips.length > 0 && (
           <SelectionBar

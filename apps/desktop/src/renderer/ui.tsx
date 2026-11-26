@@ -45,11 +45,19 @@ export function timeAgo(timestamp: number): string {
 // rather than switching to a second drawing, so state reads at a glance.
 type IconName =
   | 'star' | 'copy' | 'folder' | 'trash' | 'edit' | 'camera' | 'send' | 'play' | 'pause'
-  | 'sliders' | 'volume' | 'mute' | 'up' | 'down' | 'left' | 'close' | 'search' | 'grid' | 'pencil' | 'check'
+  | 'settings' | 'gamepad' | 'video' | 'plus' | 'bell' | 'user' | 'scissors' | 'alert' | 'volume' | 'mute' | 'up' | 'down' | 'left' | 'close' | 'search' | 'grid' | 'pencil' | 'check'
   | 'image' | 'link' | 'download'
 
 const PATHS: Record<IconName, React.ReactNode> = {
-  sliders: <path d="M21 4h-7M10 4H3M21 12h-9M8 12H3M21 20h-5M12 20H3M14 2v4M8 10v4M16 18v4" />,
+  // Lucide shapes (lucide.dev, ISC licence), drawn by this component's 1.6 stroke.
+  settings: <><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z" /><circle cx="12" cy="12" r="3" /></>,
+  gamepad: <><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01" /><path d="M17.32 5H6.68a4 4 0 00-3.98 3.59l-.6 5.84A3 3 0 005.07 18c.98 0 1.87-.53 2.33-1.39l.6-1.11h8l.6 1.11A2.66 2.66 0 0018.93 18a3 3 0 002.97-3.57l-.6-5.84A4 4 0 0017.32 5z" /></>,
+  video: <><path d="M16 13l5.22 3.48a.5.5 0 00.78-.42V7.87a.5.5 0 00-.75-.43L16 10.5" /><rect x="2" y="6" width="14" height="12" rx="2" /></>,
+  plus: <path d="M5 12h14M12 5v14" />,
+  bell: <><path d="M10.27 21a2 2 0 003.46 0" /><path d="M3.26 15.33A1 1 0 004 17h16a1 1 0 00.74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 006 8c0 4.5-1.41 5.96-2.74 7.33" /></>,
+  user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0116 0" /></>,
+  scissors: <><circle cx="6" cy="6" r="3" /><path d="M8.12 8.12L12 12M20 4L8.12 15.88" /><circle cx="6" cy="18" r="3" /><path d="M14.8 14.8L20 20" /></>,
+  alert: <><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></>,
   star: <path d="M12 3.2l2.7 5.5 6 .9-4.35 4.25 1.03 6-5.38-2.83-5.38 2.83 1.03-6L3.3 9.6l6-.9z" />,
   copy: <><rect x="8.5" y="8.5" width="11" height="11" rx="2" /><path d="M15.5 8.5V6a1.5 1.5 0 00-1.5-1.5H6A1.5 1.5 0 004.5 6v8A1.5 1.5 0 006 15.5h2.5" /></>,
   folder: <path d="M3.5 7.5A1.5 1.5 0 015 6h4.3l2 2.2H19a1.5 1.5 0 011.5 1.5v8.3A1.5 1.5 0 0119 19.5H5A1.5 1.5 0 013.5 18z" />,
