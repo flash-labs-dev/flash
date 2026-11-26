@@ -24,9 +24,11 @@ distributed with the application.
 
 ## Linux media build
 
-The Linux AppImage and deb link against an LGPL-only build of FFmpeg and against
-the system OpenH264 library. Both are copied into the package under
-`resources/linux-media` together with their licence files.
+The Linux AppImage and deb contain an LGPL-only build of FFmpeg, statically
+linked into `flash_capture.node`, and the system OpenH264 library, copied into
+`resources/linux-media`. Licence files are in `resources/linux-media/licenses`.
+The addon's full source and `scripts/build-linux-media.sh` are in this
+repository, so the addon can be rebuilt against a modified FFmpeg.
 
 | Component | Version | Licence | Notes |
 |-----------|---------|---------|-------|

@@ -21,7 +21,7 @@ Smart render is **unsupported on Linux**, reported in the addon's `capabilities`
 
 ## Dependencies and licence boundary
 
-No x264, GPL-enabled FFmpeg, or nonfree-enabled FFmpeg is selected or bundled. `scripts/build-linux-media.sh` builds shared FFmpeg 7.1.2 with an explicit codec list, `--disable-gpl`, `--disable-nonfree`, and `--disable-autodetect`. It enables VA-API, NVENC through the MIT-licensed nv-codec headers, OpenH264, native AAC, H.264/AAC decoding, MP4 and PNG. There are no new npm dependencies. Flash's own licence remains undecided.
+No x264, GPL-enabled FFmpeg, or nonfree-enabled FFmpeg is selected or bundled. `scripts/build-linux-media.sh` builds static FFmpeg 7.1.2 (linked into `flash_capture.node` with its symbols hidden, because Electron's own `libffmpeg.so` exports the same names) with an explicit codec list, `--disable-gpl`, `--disable-nonfree`, and `--disable-autodetect`. It enables VA-API, NVENC through the MIT-licensed nv-codec headers, OpenH264, native AAC, H.264/AAC decoding, MP4 and PNG. There are no new npm dependencies. Flash's own licence remains undecided.
 
 The runtime checks the libav configuration strings and refuses GPL/nonfree-enabled builds. Installing a distro's FFmpeg development headers is sufficient for compile-only checks, but **not sufficient for a usable or redistributable Flash media build**. Use the private prefix below for linking and packaging. Do not substitute an arbitrary `ffmpeg` executable or a distro's GPL-enabled libav libraries. The configured encoders and LGPL/GPL distinction are documented by [FFmpeg](https://ffmpeg.org/legal.html).
 

@@ -55,20 +55,26 @@ elseif(UNIX AND NOT APPLE)
   set(PLATFORM_LIBS PkgConfig::LINUX_MEDIA Threads::Threads)
 
   # libav comes from one of two places. Release builds set FLASH_MEDIA_PREFIX to
-  # the private LGPL build that ships inside the AppImage, and link it by full
-  # path: resolving it through pkg-config let the linker pick the distro's
-  # (older) libavcodec instead, so the addon asked for libavcodec.so.60 at run
-  # time while the AppImage only carries .so.61. Developer builds with no prefix
-  # use the system libav through pkg-config.
+  # the private static LGPL build and link its archives by full path, with every
+  # archive symbol made local (--exclude-libs). Electron loads its own
+  # libffmpeg.so first and it exports the same av* names, so a shared libav had
+  # its calls bound to Chromium's decode-only copy and crashed on launch.
+  # Developer builds with no prefix use the system libav through pkg-config and
+  # are only good for plain-Node probes, not for running inside Electron.
   if(NOT FLASH_MEDIA_PREFIX AND DEFINED ENV{FLASH_MEDIA_PREFIX})
     set(FLASH_MEDIA_PREFIX "$ENV{FLASH_MEDIA_PREFIX}")
   endif()
   if(FLASH_MEDIA_PREFIX)
-    foreach(av_lib avcodec avformat avutil swscale swresample)
-      find_library(FLASH_AV_${av_lib} NAMES ${av_lib}
+    # Link order matters for static archives: users before what they use.
+    foreach(av_lib avformat avcodec swscale swresample avutil)
+      find_library(FLASH_AV_${av_lib} NAMES lib${av_lib}.a
         PATHS "${FLASH_MEDIA_PREFIX}/lib" NO_DEFAULT_PATH REQUIRED)
       list(APPEND PLATFORM_LIBS "${FLASH_AV_${av_lib}}")
     endforeach()
+    # What the static libav needs from the system, resolved at run time as usual.
+    pkg_check_modules(LINUX_AV_DEPS REQUIRED IMPORTED_TARGET libva libva-drm openh264 zlib)
+    list(APPEND PLATFORM_LIBS PkgConfig::LINUX_AV_DEPS m)
+    set(FLASH_HIDE_LIBAV_SYMBOLS ON)
     include_directories(BEFORE SYSTEM "${FLASH_MEDIA_PREFIX}/include")
   else()
     pkg_check_modules(LINUX_AV REQUIRED IMPORTED_TARGET
@@ -88,6 +94,9 @@ set_target_properties(flash_capture PROPERTIES
   SUFFIX ".node"
 )
 target_link_libraries(flash_capture ${CMAKE_JS_LIB} ${PLATFORM_LIBS})
+if(FLASH_HIDE_LIBAV_SYMBOLS)
+  target_link_options(flash_capture PRIVATE "LINKER:--exclude-libs,ALL")
+endif()
 
 # Windows.Graphics.Capture, used to record fullscreen games that Desktop
 # Duplication cannot see. The C++/WinRT projection ships with the Windows SDK
