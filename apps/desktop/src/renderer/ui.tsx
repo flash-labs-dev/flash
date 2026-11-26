@@ -45,10 +45,19 @@ export function timeAgo(timestamp: number): string {
 // rather than switching to a second drawing, so state reads at a glance.
 type IconName =
   | 'star' | 'copy' | 'folder' | 'trash' | 'edit' | 'camera' | 'send' | 'play' | 'pause'
-  | 'volume' | 'mute' | 'up' | 'down' | 'left' | 'close' | 'search' | 'grid' | 'pencil' | 'check'
+  | 'settings' | 'gamepad' | 'video' | 'plus' | 'bell' | 'user' | 'scissors' | 'alert' | 'volume' | 'mute' | 'up' | 'down' | 'left' | 'close' | 'search' | 'grid' | 'pencil' | 'check'
   | 'image' | 'link' | 'download'
 
 const PATHS: Record<IconName, React.ReactNode> = {
+  // Lucide shapes (lucide.dev, ISC licence), drawn by this component's 1.6 stroke.
+  settings: <><path d="M12.22 2h-.44a2 2 0 00-2 2v.18a2 2 0 01-1 1.73l-.43.25a2 2 0 01-2 0l-.15-.08a2 2 0 00-2.73.73l-.22.38a2 2 0 00.73 2.73l.15.1a2 2 0 011 1.72v.51a2 2 0 01-1 1.74l-.15.09a2 2 0 00-.73 2.73l.22.38a2 2 0 002.73.73l.15-.08a2 2 0 012 0l.43.25a2 2 0 011 1.73V20a2 2 0 002 2h.44a2 2 0 002-2v-.18a2 2 0 011-1.73l.43-.25a2 2 0 012 0l.15.08a2 2 0 002.73-.73l.22-.39a2 2 0 00-.73-2.73l-.15-.08a2 2 0 01-1-1.74v-.5a2 2 0 011-1.74l.15-.09a2 2 0 00.73-2.73l-.22-.38a2 2 0 00-2.73-.73l-.15.08a2 2 0 01-2 0l-.43-.25a2 2 0 01-1-1.73V4a2 2 0 00-2-2z" /><circle cx="12" cy="12" r="3" /></>,
+  gamepad: <><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01" /><path d="M17.32 5H6.68a4 4 0 00-3.98 3.59l-.6 5.84A3 3 0 005.07 18c.98 0 1.87-.53 2.33-1.39l.6-1.11h8l.6 1.11A2.66 2.66 0 0018.93 18a3 3 0 002.97-3.57l-.6-5.84A4 4 0 0017.32 5z" /></>,
+  video: <><path d="M16 13l5.22 3.48a.5.5 0 00.78-.42V7.87a.5.5 0 00-.75-.43L16 10.5" /><rect x="2" y="6" width="14" height="12" rx="2" /></>,
+  plus: <path d="M5 12h14M12 5v14" />,
+  bell: <><path d="M10.27 21a2 2 0 003.46 0" /><path d="M3.26 15.33A1 1 0 004 17h16a1 1 0 00.74-1.67C19.41 13.96 18 12.5 18 8A6 6 0 006 8c0 4.5-1.41 5.96-2.74 7.33" /></>,
+  user: <><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0116 0" /></>,
+  scissors: <><circle cx="6" cy="6" r="3" /><path d="M8.12 8.12L12 12M20 4L8.12 15.88" /><circle cx="6" cy="18" r="3" /><path d="M14.8 14.8L20 20" /></>,
+  alert: <><circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" /></>,
   star: <path d="M12 3.2l2.7 5.5 6 .9-4.35 4.25 1.03 6-5.38-2.83-5.38 2.83 1.03-6L3.3 9.6l6-.9z" />,
   copy: <><rect x="8.5" y="8.5" width="11" height="11" rx="2" /><path d="M15.5 8.5V6a1.5 1.5 0 00-1.5-1.5H6A1.5 1.5 0 004.5 6v8A1.5 1.5 0 006 15.5h2.5" /></>,
   folder: <path d="M3.5 7.5A1.5 1.5 0 015 6h4.3l2 2.2H19a1.5 1.5 0 011.5 1.5v8.3A1.5 1.5 0 0119 19.5H5A1.5 1.5 0 013.5 18z" />,
@@ -88,17 +97,12 @@ export function Icon({ name, size = 20, filled = false, strokeWidth = 1.6 }: {
   )
 }
 
-export function StickmanIcon({ size = 22 }: { size?: number }) {
+// The bolt-F mark from docs/flash-ui-handoff/assets/logo-bolt.svg, without its metadata.
+export function BoltLogo({ size = 22 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-      <circle cx="14" cy="3.5" r="2" />
-      <line x1="14" y1="5.5" x2="12" y2="11" />
-      <line x1="12" y1="8" x2="8.5" y2="6.5" />
-      <line x1="12" y1="8" x2="16" y2="6" />
-      <line x1="12" y1="11" x2="9" y2="16" />
-      <line x1="9" y1="16" x2="7" y2="14" />
-      <line x1="12" y1="11" x2="15" y2="15.5" />
-      <line x1="15" y1="15.5" x2="18" y2="17" />
+    <svg width={size} height={size * 606 / 540} viewBox="300 232 540 606" aria-hidden="true">
+      <polygon points="380,250 820,250 790,350 480,350 462,430 700,430 480,820 520,560 320,560"
+        fill="currentColor" stroke="currentColor" strokeWidth="26" strokeLinejoin="round" />
     </svg>
   )
 }

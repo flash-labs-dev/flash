@@ -9,97 +9,21 @@
 
 :root,
 [data-theme='blood'] {
-  --bg: #0a0a0b;
-  --panel: #121316;
-  --field: #1b1d22;
-  --edge: #2a2d34;
-  --hover: #1f2126;
-  --fg: #f2f3f5;
-  --muted: #9aa0ab;
-  --accent: #e8192c;
-  --accent-dim: #8c0f1b;
+  /* Redesign spec palette (docs/flash-ui-handoff/DESIGN_SPEC.md §1). */
+  --bg: #0b0b0c;
+  --panel: #141417;
+  --field: #17171a;
+  --edge: #2a2a2f;
+  --hover: #1c1c20;
+  --fg: #f4f4f5;
+  --muted: #9a9aa3;
+  --accent: #d10f0f;
+  --accent-dim: #7a0909;
   --on-accent: #ffffff;
   --spark: #ffb020;
   /* The accent is red on this theme, so errors move to a hot rose that cannot
      be mistaken for a live state. */
   --alert: #ff6b8e;
-}
-
-[data-theme='ultraviolet'] {
-  --bg: #0a090d;
-  --panel: #131218;
-  --field: #1d1b24;
-  --edge: #2d2a37;
-  --hover: #201e28;
-  --fg: #f4f2f8;
-  --muted: #a19caf;
-  --accent: #b45cff;
-  --accent-dim: #6b2bb3;
-  --on-accent: #12051f;
-  --spark: #ff9ad0;
-  --alert: #ff6b6b;
-}
-
-[data-theme='cobalt'] {
-  --bg: #090a0d;
-  --panel: #111318;
-  --field: #1a1e25;
-  --edge: #293039;
-  --hover: #1e2229;
-  --fg: #f1f4f8;
-  --muted: #98a2b3;
-  --accent: #4d7cfe;
-  --accent-dim: #2647a8;
-  --on-accent: #050b1e;
-  --spark: #ffb020;
-  --alert: #ff6b6b;
-}
-
-[data-theme='fuchsia'] {
-  --bg: #0c090b;
-  --panel: #151115;
-  --field: #201a1f;
-  --edge: #33292f;
-  --hover: #221b21;
-  --fg: #fbf2f7;
-  --muted: #ab9ca6;
-  --accent: #ff4fa3;
-  --accent-dim: #a51a62;
-  --on-accent: #1e0512;
-  --spark: #ffb020;
-  /* Coral sits too close to this accent, so errors go deeper red. */
-  --alert: #ff4d5e;
-}
-
-[data-theme='indigo'] {
-  --bg: #09090d;
-  --panel: #121219;
-  --field: #1b1b25;
-  --edge: #2b2b39;
-  --hover: #1f1f2b;
-  --fg: #f2f2fb;
-  --muted: #9d9db8;
-  --accent: #7c74ff;
-  --accent-dim: #4239b8;
-  --on-accent: #070616;
-  --spark: #ff9ad0;
-  --alert: #ff6b6b;
-}
-
-[data-theme='bone'] {
-  /* No hue at all; the only saturated pixels on screen belong to your clips. */
-  --bg: #0a0a0a;
-  --panel: #131313;
-  --field: #1c1c1c;
-  --edge: #2c2c2c;
-  --hover: #202020;
-  --fg: #f2f2f2;
-  --muted: #a0a0a0;
-  --accent: #f0f0f0;
-  --accent-dim: #6a6a6a;
-  --on-accent: #0a0a0a;
-  --spark: #d6d6d6;
-  --alert: #ff6b6b;
 }
 
 /* Derived steps are mixed against the ground, not against transparency, so
@@ -119,8 +43,19 @@
   /* "Live" green stays green on every theme; it is a status, not decoration. */
   --ok: #4ade80;
 
-  --font-display: 'Antonio Variable', 'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif;
-  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Noto Sans', Cantarell, Ubuntu, sans-serif;
+  --font-ui: 'Geist Variable', system-ui, sans-serif;
+  --font-display: var(--font-ui);
+
+  /* Redesign neutrals shared by every theme: content ground, chrome and panel
+     dividers, and the two text steps between --fg and --muted. */
+  --bg-content: #0f0f11;
+  --border: #1f1f23;
+  --border-subtle: #222226;
+  --text-secondary: #d4d4d8;
+  --text-faint: #8b8b94;
+  --danger-text: #ff7b7b;
+  --error-bg: #1a1112;
+  --error-border: #4a1d20;
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -167,9 +102,8 @@ input, textarea, [contenteditable="true"] {
 .display {
   font-family: var(--font-display);
   font-weight: 600;
-  text-transform: uppercase;
-  line-height: 0.92;
-  letter-spacing: -0.005em;
+  line-height: 1.1;
+  letter-spacing: -0.02em;
   font-variant-numeric: tabular-nums;
 }
 
@@ -193,13 +127,11 @@ input, textarea, [contenteditable="true"] {
   height: 34px;
   padding: 0 16px;
   border-radius: 6px;
-  border: 1px solid var(--line);
-  background: transparent;
+  border: 1px solid var(--edge);
+  background: var(--field);
   color: var(--fg);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, opacity 140ms ease;
@@ -212,7 +144,15 @@ input, textarea, [contenteditable="true"] {
 .btn-solid { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .btn-solid:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 86%, var(--bg)); border-color: transparent; }
 
-.btn-sm { height: 28px; padding: 0 12px; font-size: 10px; }
+.btn-sm { height: 30px; padding: 0 12px; font-size: 12px; }
+
+/* Filled key chip for hotkeys in running text and the title bar (spec §2). */
+.chip-key {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 4px;
+  background: #2a2a30; color: var(--text-secondary);
+  font-family: inherit; font-size: 11px; font-weight: 600;
+}
 
 .btn-danger { color: var(--alert); border-color: color-mix(in srgb, var(--alert) 45%, transparent); }
 .btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--alert) 12%, transparent); border-color: var(--alert); }
@@ -538,4 +478,14 @@ input, textarea, [contenteditable="true"] {
 .tile-pending { background: linear-gradient(110deg, var(--panel) 30%, var(--field) 50%, var(--panel) 70%); background-size: 220% 100%; animation: lane-shimmer 1.4s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .tile-still, .tile-live, .tile-pending { animation: none; }
+}
+
+/* Library search: grows while in use, so long game names fit. */
+.search-field {
+  width: 180px;
+  transition: width 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.search-field:focus,
+.search-field:not(:placeholder-shown) {
+  width: 320px;
 }
