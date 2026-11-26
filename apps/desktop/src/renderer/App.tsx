@@ -683,7 +683,6 @@ export default function App() {
       {view === 'Settings' && (
         <main className="absolute inset-0 flex flex-col">
           <SettingsView
-            previewClip={clips.filter(clip => clip.kind !== 'shot').sort((x, y) => y.createdAt - x.createdAt)[0]?.filePath}
             settings={settings} onChange={updateSettings} storage={storage} encoder={encoder}
             captureBackend={captureBackend}
             voiceStatus={voiceStatus}

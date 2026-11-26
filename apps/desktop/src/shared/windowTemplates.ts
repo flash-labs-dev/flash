@@ -29,14 +29,14 @@ export function toastHtml(theme: string, font: string, durationSeconds: number, 
     .toast{height:64px;display:flex;align-items:center;gap:12px;padding:0 16px;background:${t.panel};
       animation:enter .42s cubic-bezier(.16,1,.3,1) both}
     .toast.out{animation:leave .28s cubic-bezier(.7,0,.84,0) both}
-    .icon{width:36px;height:36px;border-radius:6px;display:grid;place-items:center;flex-shrink:0;background:${t.field};border:1px solid ${t.edge};color:${t.accent}}
+    .icon{display:flex;flex-shrink:0;color:#fff}
     .text{min-width:0}
     h3{font-size:14px;font-weight:500;letter-spacing:-.01em;line-height:18px}
     p{font-size:12px;line-height:16px;color:${t.muted};font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     @keyframes enter{from{transform:translateX(${away})}to{transform:none}}
     @keyframes leave{to{transform:translateX(${away})}}
   </style></head><body><div class="surface toast" id="toast">
-    <div class="icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg></div>
+    <div class="icon"><svg width="22" height="25" viewBox="300 232 540 606" aria-hidden="true"><polygon points="380,250 820,250 790,350 480,350 462,430 700,430 480,820 520,560 320,560" fill="currentColor" stroke="currentColor" stroke-width="26" stroke-linejoin="round"/></svg></div>
     <div class="text"><h3>Clip saved</h3><p>${meta}</p></div></div>
     <script>window.leave = () => document.getElementById('toast').classList.add('out')</script></body></html>`
 }

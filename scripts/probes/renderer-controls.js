@@ -56,7 +56,7 @@ app.whenReady().then(async () => {
     const bounds = cornerBounds({ x: -1920, y: 0, width: 1920, height: 1080 }, corner, 280, 72)
     assert(bounds.x >= -1920 && bounds.x + bounds.width <= 0 && bounds.y >= 0 && bounds.y + bounds.height <= 1080)
   }
-  console.log('PASS: six toast/overlay themes load bundled Geist, reduced motion disables animations, all corners stay on target')
+  console.log('PASS: toast/overlay theme load bundled Geist, reduced motion disables animations, all corners stay on target')
   window.destroy()
   app.quit()
 }).catch(error => { console.error(error); app.exit(1) })

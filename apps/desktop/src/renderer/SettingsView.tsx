@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import { clipUrl } from '../shared/editor'
-import { THEMES } from '../shared/themes'
 import { toAccelerator } from '../shared/accelerator'
 import { resolveGameSettings } from '../shared/perGame'
 import { countSyllables } from '../shared/syllables'
@@ -73,36 +72,7 @@ function qualityFps(quality: string): number {
   return match ? Number(match[1]) : 0
 }
 
-// One still from a real clip, so each theme is previewed over actual footage
-// rather than an empty box. Decoded once into a small JPEG and the decoder is
-// released straight away.
-function useClipStill(filePath: string | undefined): string | null {
-  const [still, setStill] = useState<string | null>(null)
-  useEffect(() => {
-    if (!filePath) return
-    let cancelled = false
-    const video = document.createElement('video')
-    video.muted = true
-    video.preload = 'auto'
-    video.crossOrigin = 'anonymous'
-    const release = () => { video.removeAttribute('src'); video.load() }
-    video.addEventListener('seeked', () => {
-      if (cancelled) return
-      const canvas = document.createElement('canvas')
-      canvas.width = 384
-      canvas.height = 216
-      canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height)
-      try { setStill(canvas.toDataURL('image/jpeg', 0.8)) } catch { /* tainted or empty: keep the plain swatch */ }
-      release()
-    }, { once: true })
-    video.addEventListener('loadedmetadata', () => { video.currentTime = Math.min(1, video.duration / 2 || 0) }, { once: true })
-    video.src = clipUrl(filePath)
-    return () => { cancelled = true; release() }
-  }, [filePath])
-  return still
-}
-
-const SECTIONS = ['Appearance', 'Capture', 'Voice', 'Games', 'Overlay', 'Storage'] as const
+const SECTIONS = ['Capture', 'Voice', 'Games', 'Overlay', 'Storage'] as const
 
 // ── Pieces ────────────────────────────────────────────────────────────────────
 
@@ -395,8 +365,7 @@ export function FeedbackDialog({ onClose, onSent }: { onClose: () => void; onSen
 
 // ── View ──────────────────────────────────────────────────────────────────────
 
-export function SettingsView({ previewClip, settings, onChange, storage, encoder, captureBackend, voiceStatus, hotkeysRegistered, autostart, onToggleAutostart, displays, health, learnedGames, onForgetGame, onOpenFolder, onPickFolder }: {
-  previewClip?: string
+export function SettingsView({ settings, onChange, storage, encoder, captureBackend, voiceStatus, hotkeysRegistered, autostart, onToggleAutostart, displays, health, learnedGames, onForgetGame, onOpenFolder, onPickFolder }: {
   settings: Settings
   onChange: (partial: Partial<Settings>) => void
   storage: { used: number; clips: number }
@@ -419,7 +388,6 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
   const customPhraseSyllables = countSyllables(settings.voicePhrase)
   const customPhraseTooShort = settings.voicePhrase.trim().length > 0 && customPhraseSyllables < 3
 
-  const still = useClipStill(previewClip)
   const scroller = useRef<HTMLDivElement>(null)
   const sectionNodes = useRef<Record<string, HTMLElement | null>>({})
   const [current, setCurrent] = useState<string>(SECTIONS[0])
@@ -477,39 +445,6 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
         </nav>
 
         <div className="flex-1 min-w-0" style={{ paddingTop: 8 }}>
-          <Section id="Appearance" title="Appearance" sectionRef={register('Appearance')}>
-            <div className="grid" style={{ gap: 12, paddingTop: 20, gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
-              {Object.entries(THEMES).map(([key, theme]) => {
-                const selected = settings.theme === key
-                return (
-                  <button key={key} onClick={() => onChange({ theme: key })} aria-pressed={selected}
-                    className="flex flex-col text-left" style={{ gap: 10 }}>
-                    {/* The Watch screen in that palette: your latest clip under
-                        the theme's scrim, its title, and the accent where it
-                        actually appears - the REC light and the progress bar. */}
-                    <span className="relative block w-full overflow-hidden"
-                      style={{
-                        aspectRatio: '16 / 10', borderRadius: 8, background: theme.bg,
-                        outline: selected ? '2px solid var(--fg)' : `1px solid ${theme.edge}`, outlineOffset: selected ? 2 : 0,
-                      }}>
-                      {still && <img src={still} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-                      <span className="absolute inset-0" style={{ background: `linear-gradient(to top, ${theme.bg} 8%, ${theme.bg}99 45%, transparent 80%)` }} />
-                      <span className="absolute flex items-center" style={{ left: 8, top: 8, gap: 4, padding: '2px 6px', borderRadius: 99, background: `${theme.bg}b3` }}>
-                        <span style={{ width: 6, height: 6, borderRadius: 99, background: theme.accent }} />
-                        <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: theme.fg }}>REC</span>
-                      </span>
-                      <span className="absolute display" style={{ left: 10, bottom: 16, fontSize: 22, color: theme.fg }}>9 Oct</span>
-                      <span className="absolute" style={{ left: 0, right: 0, bottom: 0, height: 4, background: `${theme.fg}33` }}>
-                        <span className="absolute" style={{ left: 0, top: 0, bottom: 0, width: '45%', background: theme.accent }} />
-                      </span>
-                    </span>
-                    <span className="caps" style={{ color: selected ? 'var(--fg)' : 'var(--muted)' }}>{theme.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </Section>
-
           <Section id="Capture" title="Capture" sectionRef={register('Capture')}>
             <Row label="Clip hotkey" hint={`Saves the full ${settings.bufferLength} seconds.`}>
               <HotkeyInput label="Clip hotkey" value={settings.hotkey} registered={hotkeysRegistered.clip}
