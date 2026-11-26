@@ -869,7 +869,7 @@ function onClipSaved(clip: { path: string; duration: number }, game: string) {
   } catch { /* sidecar is an optimisation, not required */ }
   // The clip is already on disk; a toast that fails to draw must not turn a
   // successful save into a reported error.
-  try { showClipNotification(clip.duration) } catch (error) { console.warn('Could not show the clip toast', error) }
+  try { showClipNotification(clip.duration, game) } catch (error) { console.warn('Could not show the clip toast', error) }
   playClipSound()
   mainWindow?.webContents.send('clip-saved-refresh')
 }
@@ -1192,7 +1192,7 @@ function captureDisplay() {
   return screen.getPrimaryDisplay()
 }
 
-function showClipNotification(durationSeconds: number) {
+function showClipNotification(durationSeconds: number, game: string) {
   if (!settings.notifications) return
 
   if (notificationWindow && !notificationWindow.isDestroyed()) {
@@ -1210,7 +1210,7 @@ function showClipNotification(durationSeconds: number) {
   notification.setAlwaysOnTop(true, 'screen-saver')
   notification.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   notification.setIgnoreMouseEvents(true, { forward: true })
-  const html = toastHtml(settings.theme, uiFont(), durationSeconds)
+  const html = toastHtml(settings.theme, uiFont(), durationSeconds, game, settings.overlayPosition)
   notification.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   let timer: ReturnType<typeof setTimeout> | undefined
   notification.once('closed', () => {
@@ -1221,11 +1221,11 @@ function showClipNotification(durationSeconds: number) {
   notification.once('ready-to-show', () => {
     if (notification.isDestroyed()) return
     notification.showInactive()
-    // Play the exit animation, then close; the 240 ms matches .toast.out in windowTemplates.
+    // Play the exit animation, then close; 300 ms covers .toast.out (280 ms) in windowTemplates.
     timer = setTimeout(() => {
       if (notification.isDestroyed()) return
       notification.webContents.executeJavaScript('window.leave()').catch(() => {})
-      timer = setTimeout(() => { if (!notification.isDestroyed()) notification.close() }, 240)
+      timer = setTimeout(() => { if (!notification.isDestroyed()) notification.close() }, 300)
     }, 3000)
   })
 }

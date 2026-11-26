@@ -16,25 +16,28 @@ function style(theme: string, font: string) {
   `
 }
 
-export function toastHtml(theme: string, font: string, durationSeconds: number) {
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
+
+// Slides in from, and back out to, the screen edge nearest its corner.
+export function toastHtml(theme: string, font: string, durationSeconds: number, game = '', position = 'top-left') {
+  const t = getTheme(theme)
   const seconds = Math.max(0, Math.floor(durationSeconds))
   const duration = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
-  const accent = getTheme(theme).accent
+  const meta = game && game !== 'Unknown' ? `${duration} · ${escapeHtml(game)}` : duration
+  const away = position.endsWith('right') ? 'calc(100% + 24px)' : 'calc(-100% - 24px)'
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${style(theme, font)}
-    .toast{height:64px;display:flex;align-items:center;gap:12px;padding:0 16px;border-radius:12px;
-      animation:enter .32s cubic-bezier(.16,1,.3,1) both}
-    .toast.out{animation:leave .22s cubic-bezier(.4,0,1,1) both}
-    .badge{width:32px;height:32px;border-radius:8px;display:grid;place-items:center;flex-shrink:0;background:${accent}}
-    .badge path{stroke-dasharray:24;stroke-dashoffset:24;animation:draw .3s .14s ease-out forwards}
-    h3{font-size:14px;font-weight:600;letter-spacing:-.01em;margin-bottom:2px}
-    p{font-size:12px;opacity:.6;font-variant-numeric:tabular-nums}
-    @keyframes enter{from{opacity:0;transform:translateY(-8px) scale(.97)}to{opacity:1;transform:none}}
-    @keyframes leave{to{opacity:0;transform:translateY(-4px) scale(.98)}}
-    @keyframes draw{to{stroke-dashoffset:0}}
-    @media(prefers-reduced-motion:reduce){.badge path{stroke-dashoffset:0}}
+    .toast{height:64px;display:flex;align-items:center;gap:12px;padding:0 16px;background:${t.panel};
+      animation:enter .42s cubic-bezier(.16,1,.3,1) both}
+    .toast.out{animation:leave .28s cubic-bezier(.7,0,.84,0) both}
+    .icon{width:36px;height:36px;border-radius:6px;display:grid;place-items:center;flex-shrink:0;background:${t.field};border:1px solid ${t.edge};color:${t.accent}}
+    .text{min-width:0}
+    h3{font-size:14px;font-weight:500;letter-spacing:-.01em;line-height:18px}
+    p{font-size:12px;line-height:16px;color:${t.muted};font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    @keyframes enter{from{transform:translateX(${away})}to{transform:none}}
+    @keyframes leave{to{transform:translateX(${away})}}
   </style></head><body><div class="surface toast" id="toast">
-    <div class="badge"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></div>
-    <div><h3>Clip saved</h3><p>${duration} saved to library</p></div></div>
+    <div class="icon"><svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg></div>
+    <div class="text"><h3>Clip saved</h3><p>${meta}</p></div></div>
     <script>window.leave = () => document.getElementById('toast').classList.add('out')</script></body></html>`
 }
 
