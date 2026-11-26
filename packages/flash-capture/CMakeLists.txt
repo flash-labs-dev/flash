@@ -83,6 +83,10 @@ elseif(UNIX AND NOT APPLE)
   endif()
   file(GLOB LINUX_SOURCES CONFIGURE_DEPENDS src/platform/linux/*.cpp)
   set(CAPTURE_SOURCES src/binding.cpp src/core/ring_buffer.cpp ${LINUX_SOURCES})
+  # The same engine as a static library with a C API, for the Rust/Tauri build.
+  # Not built by default: cargo builds it through apps/flash-tauri/src-tauri/build.rs.
+  add_library(flash_engine STATIC EXCLUDE_FROM_ALL src/engine_capi.cpp src/core/ring_buffer.cpp ${LINUX_SOURCES})
+  target_link_libraries(flash_engine PUBLIC ${PLATFORM_LIBS})
 else()
   message(FATAL_ERROR "Flash capture supports Windows and Linux only")
 endif()
