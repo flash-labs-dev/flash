@@ -32,6 +32,7 @@ class PipeWireVideo final : public VideoSource {
     uint32_t display_ = 0;
     std::atomic<bool> retarget_{false};
     std::string backend_ = "portal-pipewire";
+    std::string failedWindow_;  // a window KWin refused; not retried until the game changes
     pw_stream* stream_ = nullptr;
     spa_video_info_raw format_{};
     int64_t lastFrame_ = -1000000;
@@ -179,7 +180,8 @@ class PipeWireVideo final : public VideoSource {
             bool onWindow = false, useKWin = kwin->Connect();
             if (useKWin) {
                 const auto uuid = kwin->WindowForPid(targetPid);
-                onWindow = !uuid.empty() && kwin->StreamWindow(uuid);
+                onWindow = !uuid.empty() && uuid != failedWindow_ && kwin->StreamWindow(uuid);
+                if (!uuid.empty() && !onWindow) failedWindow_ = uuid;
                 if (!onWindow) {
                     if (!uuid.empty()) { kwin = std::make_unique<KWinScreencast>(); useKWin = kwin->Connect(); }
                     useKWin = useKWin && kwin->StreamOutput(display_);
@@ -234,11 +236,13 @@ class PipeWireVideo final : public VideoSource {
                     if (kwin && CaptureClockUs() - lastTargetCheck > 1000000) {
                         lastTargetCheck = CaptureClockUs();
                         const uint32_t wanted = CaptureWindowPid();
-                        if (wanted != targetPid || (wanted && !onWindow && !kwin->WindowForPid(wanted).empty())) {
+                        const auto uuid = wanted && !onWindow ? kwin->WindowForPid(wanted) : std::string{};
+                        if (wanted != targetPid || (!uuid.empty() && uuid != failedWindow_)) {
                             retarget_ = true; break;
                         }
                     }
-                    if (lastFrame_ >= 0 && CaptureClockUs() - lastFrame_ > 5000000) {
+                    // KWin sends a window's frames only when it changes, so an idle game is not a dead stream.
+                    if (!(onWindow && producedFrame_) && lastFrame_ >= 0 && CaptureClockUs() - lastFrame_ > 5000000) {
                         std::lock_guard lock(mutex_); healthy_ = false; error_ = "No PipeWire video frames for five seconds";
                     }
                 }

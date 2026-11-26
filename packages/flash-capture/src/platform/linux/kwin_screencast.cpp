@@ -7,7 +7,10 @@
 #include "plasma-window-management-client.h"
 #include <wayland-client.h>
 #include <poll.h>
+#include <algorithm>
 #include <atomic>
+#include <chrono>
+#include <mutex>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -29,6 +32,12 @@ uint32_t ParentOf(uint32_t pid) {
     const auto close = line.rfind(')'); if (close == std::string::npos) return 0;
     char state = 0; unsigned parent = 0;
     return std::sscanf(line.c_str() + close + 1, " %c %u", &state, &parent) == 2 ? parent : 0;
+}
+// wl_display_prepare_read, but false instead of spinning once the connection errors.
+bool PrepareRead(wl_display* display) {
+    while (wl_display_prepare_read(display) != 0)
+        if (wl_display_dispatch_pending(display) < 0) return false;
+    return true;
 }
 bool DescendsFrom(uint32_t pid, uint32_t ancestor) {
     for (int depth = 0; pid > 1 && depth < 16; ++depth, pid = ParentOf(pid))
@@ -123,7 +132,7 @@ struct KWinScreencast::Impl {
         // KWin answers once PipeWire has the node, which can take a while, so a
         // roundtrip is not enough: wait on the socket, up to three seconds.
         for (int waited = 0; !settled && waited < 3000; waited += 50) {
-            while (wl_display_prepare_read(display) != 0) wl_display_dispatch_pending(display);
+            if (!PrepareRead(display)) { error = "Lost the KWin connection"; return false; }
             wl_display_flush(display);
             pollfd fd{wl_display_get_fd(display), POLLIN, 0};
             if (poll(&fd, 1, 50) > 0) wl_display_read_events(display); else wl_display_cancel_read(display);
@@ -159,6 +168,12 @@ bool KWinScreencast::Connect() {
     wl_registry_add_listener(impl_->registry, &listener, impl_.get());
     // Globals, then the windows and outputs they announce, then their properties.
     for (int i = 0; i < 3; ++i) if (wl_display_roundtrip(impl_->display) < 0) return false;
+    // Stable ids across hotplug (registry order is not), and no 0x0 outputs to divide by.
+    auto& outputs = impl_->outputs;
+    for (auto& output : outputs)
+        if (output->width <= 0 || output->height <= 0) { wl_output_release(output->handle); output.reset(); }
+    outputs.erase(std::remove(outputs.begin(), outputs.end(), nullptr), outputs.end());
+    std::sort(outputs.begin(), outputs.end(), [](const auto& a, const auto& b) { return a->name < b->name; });
     return impl_->windows && impl_->screencast && !impl_->outputs.empty();
 }
 
@@ -209,7 +224,7 @@ const std::string& KWinScreencast::Error() const { return impl_->error; }
 bool KWinScreencast::Pump() {
     // Non-blocking: read whatever KWin sent, so a closed window ends the session.
     auto* display = impl_->display;
-    while (wl_display_prepare_read(display) != 0) wl_display_dispatch_pending(display);
+    if (!PrepareRead(display)) return false;
     wl_display_flush(display);
     pollfd fd{wl_display_get_fd(display), POLLIN, 0};
     if (poll(&fd, 1, 0) > 0) wl_display_read_events(display); else wl_display_cancel_read(display);
@@ -218,7 +233,15 @@ bool KWinScreencast::Pump() {
 }
 
 std::vector<DisplayInfo> ListKWinOutputs() {
-    KWinScreencast kwin;
-    return kwin.Connect() ? kwin.Outputs() : std::vector<DisplayInfo>{};
+    // Called from the UI thread; reconnecting to KWin each time costs three roundtrips.
+    static std::mutex mutex; static std::vector<DisplayInfo> cached; static int64_t cachedAt = -1;
+    std::lock_guard lock(mutex);
+    const int64_t now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+    if (cachedAt < 0 || now - cachedAt >= 5) {
+        KWinScreencast kwin;
+        cached = kwin.Connect() ? kwin.Outputs() : std::vector<DisplayInfo>{};
+        cachedAt = now;
+    }
+    return cached;
 }
 } // namespace flash
