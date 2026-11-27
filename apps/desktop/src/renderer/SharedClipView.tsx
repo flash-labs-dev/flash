@@ -31,7 +31,7 @@ export function SharedClipView({ link }: { link: SharedClipLink }) {
       <div style={{ width: 'min(1120px, calc(100% - 96px))', height: '100%', margin: '0 auto', padding: '32px 0 40px', display: 'flex', flexDirection: 'column', gap: 20 }}>
         <div>
           <div className="caps" style={{ color: 'var(--muted)', marginBottom: 8 }}>Shared clip</div>
-          <h1 className="display" style={{ color: 'var(--fg)', fontSize: 48, lineHeight: .92 }}>Shared clip</h1>
+          <h1 className="display" style={{ color: 'var(--fg)', fontSize: 28 }}>Shared clip</h1>
         </div>
         <div style={{ flex: 1, minHeight: 160, position: 'relative', display: 'grid', placeItems: 'center', background: '#000', border: '1px solid var(--edge-soft)' }}>
           {safeUrl

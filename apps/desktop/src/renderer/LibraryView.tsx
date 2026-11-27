@@ -178,7 +178,7 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
             <section key={group.key} aria-label={group.label ?? 'Clips'}>
               {group.label && (
                 <header className="flex items-baseline gap-4" style={{ padding: '36px 24px 14px' }}>
-                  <h2 className="display" style={{ fontSize: 56, color: 'var(--fg)' }}>{group.label}</h2>
+                  <h2 className="display" style={{ fontSize: 20, color: 'var(--fg)' }}>{group.label}</h2>
                   <span className="caps" style={{ color: 'var(--muted)' }}>{group.weekday}</span>
                   <span className="tabular" style={{ fontSize: 12, color: 'var(--muted-3)' }}>
                     {group.clips.length} clip{group.clips.length === 1 ? '' : 's'}
@@ -320,9 +320,9 @@ function ClipTile({ clip, heading, selected, onClick, onToggle, onDelete, onStar
       <div className="tile-scrim" />
 
       <div className="absolute flex flex-col" style={{ left: 14, right: 14, bottom: 12, pointerEvents: 'none' }}>
-        <span className="display truncate" style={{ fontSize: 24, color: 'var(--fg)' }}>{heading}</span>
+        <span className="display truncate" style={{ fontSize: 15, color: 'var(--fg)' }}>{heading}</span>
         <span className="flex items-center gap-2 tabular" style={{ fontSize: 11, color: 'color-mix(in srgb, var(--fg) 72%, transparent)', marginTop: 5 }}>
-          <span className="caps truncate" style={{ fontSize: 10 }}>{clip.game}</span>
+          <span className="caps truncate">{clip.game}</span>
           <span aria-hidden="true">·</span>
           {clip.kind === 'shot'
             ? <span className="flex items-center gap-1"><Icon name="image" size={12} /> Screenshot</span>

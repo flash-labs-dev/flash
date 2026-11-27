@@ -7,7 +7,7 @@ function style(theme: string, font: string) {
     *{margin:0;padding:0;box-sizing:border-box}
     body{font-family:Geist,system-ui,sans-serif;background:transparent;color:${t.fg};overflow:hidden}
     .surface{background:${t.bg};border:1px solid ${t.edge};border-radius:${WINDOW_TOKENS.popover}px}
-    .label{font-size:11px;font-weight:600;letter-spacing:${WINDOW_TOKENS.tracking};text-transform:uppercase}
+    .label{font-size:11px;font-weight:600}
     .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${t.accent}}
     .dot.idle{background:${t.muted}}
     .dot.live{animation:pulse 1.6s ease-in-out infinite}
