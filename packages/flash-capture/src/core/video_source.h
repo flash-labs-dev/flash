@@ -42,6 +42,7 @@ public:
     virtual void SaveScreenshot(const std::string& path) = 0;
     virtual bool IsCapturing() const = 0;
     virtual bool IsHealthy() const = 0;
+    virtual bool NeedsReinitialize() const { return false; }
     virtual bool IsPending() const { return false; }
     virtual std::string GetCaptureError() const = 0;
     virtual std::string GetCaptureBackend() const = 0;

@@ -4,6 +4,7 @@
 #include "core/voice_trigger.h"
 #include "core/encoder.h"
 #include "core/ring_buffer.h"
+#include "core/capture_clock.h"
 #include "core/clip_writer.h"
 #include "core/clip_exporter.h"
 #include "core/clip_trimmer.h"
@@ -106,6 +107,8 @@ Quality quality;
 std::array<bool, kAudioTrackCount> audioEnabled{true, true, true, true, true};
 // Which executables go to the Discord and Music lanes. Lower case.
 AudioLaneConfig audioLanes{{"discord.exe"}, {"spotify.exe"}};
+// Chosen microphone. Empty is the system default.
+std::string captureDeviceId;
 std::string pipelineError;
 std::unique_ptr<VoiceTrigger> voiceTrigger;
 VoiceStatus voiceFallbackStatus{false, "", "Voice recognition is unavailable."};
@@ -231,8 +234,13 @@ bool BuildPipeline(bool initializeAudio) {
     screen->SetGpuOutputEnabled(nextEncoder->IsHardwareAccelerated());
     std::unique_ptr<AudioSource> audio;
     if (initializeAudio) { audio = CreateAudioSource(); audio->Initialize(); }
-    // A re-created source keeps the user's lists.
-    if (initializeAudio && audio) audio->SetLanes(audioLanes);
+    // A re-created source keeps the user's lists, microphone and muted tracks.
+    // The microphone goes first: changing it rebuilds the sources.
+    if (initializeAudio && audio) {
+        audio->SetLanes(audioLanes);
+        if (!captureDeviceId.empty()) audio->SetCaptureDevice(captureDeviceId);
+        for (size_t i = 0; i < kAudioTrackCount; ++i) audio->SetSource(std::string(kAudioTrackOrder[i]), audioEnabled[i], 1.0f);
+    }
     else { std::lock_guard lock(stateMutex); audio = std::move(audioCapture); }
     auto ring = std::make_unique<RingBuffer>(bufferSeconds, quality.fps);
     std::scoped_lock lock(stateMutex, encodeMutex);
@@ -293,15 +301,27 @@ Napi::Value Initialize(const Napi::CallbackInfo& info) {
 Napi::Value StartReplayBuffer(const Napi::CallbackInfo& info) {
     // A dead encoder cannot be restarted by starting its threads again, so the
     // watchdog's stop/start only recovers if the pipeline is rebuilt first.
-    if (encoderDead.load()) {
+    // A first build or rebuild that failed (display or driver not ready) leaves
+    // no source or encoder, so a retry after Initialize has to build again.
+    if (encoderDead.load() || (!clipsDir.empty() && (!screenCapture || !encoder)) || (screenCapture && screenCapture->NeedsReinitialize())) {
         StopCapture();
-        if (!BuildPipeline(false)) { Napi::Error::New(info.Env(), pipelineError).ThrowAsJavaScriptException(); return info.Env().Undefined(); }
+        // Audio is only created here if the first build never got that far.
+        if (!BuildPipeline(!audioCapture)) { Napi::Error::New(info.Env(), pipelineError).ThrowAsJavaScriptException(); return info.Env().Undefined(); }
     }
     { std::lock_guard lock(stateMutex); if (!screenCapture || !encoder || !ringBuffer) { Napi::Error::New(info.Env(), "capture system is not initialized").ThrowAsJavaScriptException(); return info.Env().Undefined(); } if (screenCapture->IsCapturing()) return Napi::Boolean::New(info.Env(), true); }
     if (!StartCaptureThreads()) { Napi::Error::New(info.Env(), "failed to start capture thread").ThrowAsJavaScriptException(); return info.Env().Undefined(); }
     return Napi::Boolean::New(info.Env(), true);
 }
 Napi::Value StopReplayBuffer(const Napi::CallbackInfo& info) { StopCapture(); return info.Env().Undefined(); }
+Napi::Value ResetReplayAfterResume(const Napi::CallbackInfo& info) {
+    StopCapture();
+    // The old packets and the quality/display-change fallback belong to the
+    // pre-suspend session, regardless of whether QPC advanced during sleep.
+    { std::lock_guard lock(stateMutex); previousVideo.clear(); previousAudio.clear(); awaitingFirstKeyframe = false; }
+    if (!BuildPipeline(false)) { Napi::Error::New(info.Env(), pipelineError).ThrowAsJavaScriptException(); return info.Env().Undefined(); }
+    if (!StartCaptureThreads()) { Napi::Error::New(info.Env(), "failed to restart capture after resume").ThrowAsJavaScriptException(); return info.Env().Undefined(); }
+    return Napi::Boolean::New(info.Env(), true);
+}
 
 Napi::Value SetClipsDir(const Napi::CallbackInfo& info) {
     if (!info.Length() || !info[0].IsString()) { Napi::TypeError::New(info.Env(), "clips directory must be a non-empty string").ThrowAsJavaScriptException(); return info.Env().Undefined(); }
@@ -340,10 +360,11 @@ Napi::Value SaveClip(const Napi::CallbackInfo& info) {
     { std::lock_guard lock(stateMutex); if (!ringBuffer) { Napi::Error::New(info.Env(), "capture system is not initialized").ThrowAsJavaScriptException(); return info.Env().Undefined(); }
       if (awaitingFirstKeyframe && !previousVideo.empty()) {
           width = previousWidth; height = previousHeight; fps = previousFps; audio = previousAudio;
-          if (windowSeconds > 0.0) { RingBuffer previous(bufferSeconds, fps); for (const auto& packet : previousVideo) previous.Push(packet); video = previous.Flush(windowSeconds); }
-          else video = previousVideo;
+          RingBuffer previous(bufferSeconds, fps);
+          for (const auto& packet : previousVideo) previous.Push(packet);
+          video = previous.Flush(windowSeconds, CaptureClockUs());
       }
-      else { video = ringBuffer->Flush(windowSeconds); audio.assign(audioBuffer.begin(), audioBuffer.end()); width = encodeWidth; height = encodeHeight; fps = quality.fps; }
+      else { video = ringBuffer->Flush(windowSeconds, CaptureClockUs()); audio.assign(audioBuffer.begin(), audioBuffer.end()); width = encodeWidth; height = encodeHeight; fps = quality.fps; }
       if (video.empty()) { Napi::Error::New(info.Env(), "replay buffer is empty").ThrowAsJavaScriptException(); return info.Env().Undefined(); }
       // Audio outside the video's span has to go, and that is true of a
       // full-buffer save as much as a windowed one. It used to be done only
@@ -424,6 +445,13 @@ Napi::Value ListProcessesBinding(const Napi::CallbackInfo& info) {
 }
 
 Napi::Value GetStatus(const Napi::CallbackInfo& info) {
+    AudioSource* audio;
+    { std::lock_guard lock(stateMutex); audio = audioCapture.get(); }
+    // The PipeWire process callback delivers audio under its loop lock and
+    // takes stateMutex in the packet handoff. Query audio outside stateMutex.
+    const auto audioMode = audio ? audio->GetMode() : std::string("unavailable");
+    const auto audioError = audio ? audio->GetProcessError() : std::string{};
+    const auto audioSources = audio ? audio->ListSources() : std::vector<AudioSourceInfo>{};
     std::lock_guard lock(stateMutex); auto result = Napi::Object::New(info.Env()); result.Set("recording", screenCapture && screenCapture->IsCapturing());
     const bool isEncoderDead = encoderDead.load();
     result.Set("captureHealthy", !isEncoderDead && screenCapture && screenCapture->IsHealthy());
@@ -433,16 +461,16 @@ Napi::Value GetStatus(const Napi::CallbackInfo& info) {
     result.Set("captureBackend", screenCapture ? screenCapture->GetCaptureBackend() : "none");
     result.Set("bufferSeconds", ringBuffer ? ringBuffer->GetDurationSeconds() : 0); result.Set("encoder", encoder ? encoder->GetName() : "none");
     result.Set("width", encodeWidth); result.Set("height", encodeHeight); result.Set("fps", quality.fps); result.Set("bitrateKbps", quality.bitrateKbps); result.Set("displayId", displayId);
-    result.Set("audioMode", audioCapture ? audioCapture->GetMode() : "unavailable"); auto tracks = Napi::Object::New(info.Env());
+    result.Set("audioMode", audioMode); auto tracks = Napi::Object::New(info.Env());
     for (size_t i = 0; i < kAudioTrackCount; ++i) tracks.Set(std::string(kAudioTrackOrder[i]), Napi::Boolean::New(info.Env(), audioEnabled[i]));
     result.Set("audioTracks", tracks);
     // Surface why a fallback happened, and each source's own state, so a missing
     // track is diagnosable instead of just silently absent.
-    result.Set("audioError", audioCapture ? audioCapture->GetProcessError() : "");
+    result.Set("audioError", audioError);
     auto sources = Napi::Array::New(info.Env());
-    if (audioCapture) {
+    if (audio) {
         uint32_t i = 0;
-        for (const auto& source : audioCapture->ListSources()) {
+        for (const auto& source : audioSources) {
             auto entry = Napi::Object::New(info.Env());
             entry.Set("id", source.id); entry.Set("name", source.name); entry.Set("kind", source.kind);
             entry.Set("available", source.available); entry.Set("active", source.active);
@@ -510,15 +538,18 @@ Napi::Value SetAudioLanes(const Napi::CallbackInfo& info) {
             list->push_back(LowerAscii(entry.As<Napi::String>().Utf8Value()));
         }
     }
-    std::lock_guard lock(stateMutex); audioLanes = next;
-    if (audioCapture) audioCapture->SetLanes(audioLanes);
+    AudioSource* audio;
+    { std::lock_guard lock(stateMutex); audioLanes = next; audio = audioCapture.get(); }
+    if (audio) audio->SetLanes(next);
     return info.Env().Undefined();
 }
 Napi::Value ListAudioApps(const Napi::CallbackInfo& info) {
-    std::lock_guard lock(stateMutex); auto result = Napi::Array::New(info.Env());
-    if (!audioCapture) return result;
+    AudioSource* audio;
+    { std::lock_guard lock(stateMutex); audio = audioCapture.get(); }
+    auto result = Napi::Array::New(info.Env());
+    if (!audio) return result;
     uint32_t i = 0;
-    for (const auto& app : audioCapture->ListApps()) {
+    for (const auto& app : audio->ListApps()) {
         auto entry = Napi::Object::New(info.Env());
         entry.Set("exe", app.exe); entry.Set("name", app.name); entry.Set("lane", app.lane);
         entry.Set("pid", app.pid); entry.Set("capturing", app.capturing);
@@ -543,7 +574,7 @@ Napi::Value SetCaptureDevice(const Napi::CallbackInfo& info) {
     if (!info.Length() || !info[0].IsString()) { Napi::TypeError::New(info.Env(), "capture device id must be a string").ThrowAsJavaScriptException(); return info.Env().Undefined(); }
     const auto id = info[0].As<Napi::String>().Utf8Value();
     AudioSource* audio; std::array<bool, kAudioTrackCount> enabled{};
-    { std::lock_guard lock(stateMutex); audio = audioCapture.get(); enabled = audioEnabled; }
+    { std::lock_guard lock(stateMutex); captureDeviceId = id; audio = audioCapture.get(); enabled = audioEnabled; }
     // Not under stateMutex: rebuilding the sources joins the capture threads,
     // which take it to hand over packets (see SetAudioTracks).
     if (!audio) return info.Env().Undefined();
@@ -814,17 +845,25 @@ Napi::Value ExportClipBinding(const Napi::CallbackInfo& info) {
     }
     ExportOptions parsed;
     const double maxBytes = options.Get("maxBytes").As<Napi::Number>().DoubleValue();
-    if (!(maxBytes > 0)) {
-        Napi::RangeError::New(env, "maxBytes must be greater than zero").ThrowAsJavaScriptException();
+    if (!std::isfinite(maxBytes) || maxBytes < 1.0 || maxBytes > 9007199254740991.0) {
+        Napi::RangeError::New(env, "maxBytes must be between 1 and Number.MAX_SAFE_INTEGER").ThrowAsJavaScriptException();
         return env.Undefined();
     }
     parsed.maxBytes = static_cast<uint64_t>(maxBytes);
     if (options.Get("maxHeight").IsNumber())
         parsed.maxHeight = options.Get("maxHeight").As<Napi::Number>().Uint32Value();
-    if (options.Get("startSeconds").IsNumber())
-        parsed.startUs = static_cast<int64_t>(options.Get("startSeconds").As<Napi::Number>().DoubleValue() * 1000000.0);
-    if (options.Get("endSeconds").IsNumber())
-        parsed.endUs = static_cast<int64_t>(options.Get("endSeconds").As<Napi::Number>().DoubleValue() * 1000000.0);
+    for (const char* field : {"startSeconds", "endSeconds"}) {
+        if (!options.Get(field).IsNumber()) continue;
+        const double seconds = options.Get(field).As<Napi::Number>().DoubleValue();
+        if (!std::isfinite(seconds) || seconds < 0.0 || seconds >=
+                static_cast<double>((std::numeric_limits<int64_t>::max)() / 1000000 - 1)) {
+            Napi::RangeError::New(env, "export times must be finite non-negative seconds").ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        const int64_t us = static_cast<int64_t>(seconds * 1000000.0);
+        if (field[0] == 's') parsed.startUs = us;
+        else parsed.endUs = us;
+    }
 
     // Both default to no-ops, so callers written before the editor keep working.
     // Gains are keyed by name rather than position, matching setAudioTracks and
@@ -938,6 +977,7 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
     capabilities.Set("perAppAudio", PlatformSupportsPerAppAudio());
     exports.Set("capabilities", capabilities);
     exports.Set("initialize", Napi::Function::New(env, Invoke<&AddonState::Initialize>, "Initialize", this)); exports.Set("startReplayBuffer", Napi::Function::New(env, Invoke<&AddonState::StartReplayBuffer>, "StartReplayBuffer", this)); exports.Set("stopReplayBuffer", Napi::Function::New(env, Invoke<&AddonState::StopReplayBuffer>, "StopReplayBuffer", this));
+    exports.Set("resetReplayAfterResume", Napi::Function::New(env, Invoke<&AddonState::ResetReplayAfterResume>, "ResetReplayAfterResume", this));
     exports.Set("saveClip", Napi::Function::New(env, Invoke<&AddonState::SaveClip>, "SaveClip", this)); exports.Set("trimClip", Napi::Function::New(env, Invoke<&AddonState::TrimClipAsync>, "TrimClipAsync", this)); exports.Set("getStatus", Napi::Function::New(env, Invoke<&AddonState::GetStatus>, "GetStatus", this)); exports.Set("setCurrentGame", Napi::Function::New(env, Invoke<&AddonState::SetCurrentGame>, "SetCurrentGame", this)); exports.Set("setBufferLength", Napi::Function::New(env, Invoke<&AddonState::SetBufferLength>, "SetBufferLength", this)); exports.Set("exportClip", Napi::Function::New(env, Invoke<&AddonState::ExportClipBinding>, "ExportClipBinding", this)); exports.Set("setClipsDir", Napi::Function::New(env, Invoke<&AddonState::SetClipsDir>, "SetClipsDir", this));
     exports.Set("setQuality", Napi::Function::New(env, Invoke<&AddonState::SetQuality>, "SetQuality", this)); exports.Set("listDisplays", Napi::Function::New(env, Invoke<&AddonState::ListDisplays>, "ListDisplays", this)); exports.Set("setDisplay", Napi::Function::New(env, Invoke<&AddonState::SetDisplay>, "SetDisplay", this)); exports.Set("setAudioTracks", Napi::Function::New(env, Invoke<&AddonState::SetAudioTracks>, "SetAudioTracks", this));
     exports.Set("setAudioLanes", Napi::Function::New(env, Invoke<&AddonState::SetAudioLanes>, "SetAudioLanes", this));

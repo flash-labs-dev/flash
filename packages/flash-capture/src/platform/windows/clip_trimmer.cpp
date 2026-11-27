@@ -119,8 +119,8 @@ ClipMetadata TrimClip(const std::string& inputPath, const std::string& outputPat
         throw std::invalid_argument("trim range is too large");
 
 #ifdef _WIN32
-    const auto input = std::filesystem::u8path(inputPath);
-    const auto output = std::filesystem::u8path(outputPath);
+    const auto input = WindowsFilePath(std::filesystem::u8path(inputPath));
+    const auto output = WindowsFilePath(std::filesystem::u8path(outputPath));
     if (!std::filesystem::is_regular_file(input)) throw std::invalid_argument("input clip does not exist");
     if (SamePath(input, output)) throw std::invalid_argument("input and output clips must be different files");
     if (!output.parent_path().empty()) std::filesystem::create_directories(output.parent_path());
@@ -137,7 +137,7 @@ ClipMetadata TrimClip(const std::string& inputPath, const std::string& outputPat
             "disable source reader video processing");
         Check(attributes->SetUINT32(MF_READWRITE_DISABLE_CONVERTERS, TRUE),
             "disable source reader converters");
-        const auto wideInput = ToWide(inputPath);
+        const auto wideInput = input.wstring();
         Check(MFCreateSourceReaderFromURL(wideInput.c_str(), attributes.Get(), &reader),
             "MFCreateSourceReaderFromURL");
         Check(reader->SetStreamSelection(static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS), FALSE),

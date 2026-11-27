@@ -4,6 +4,7 @@
 #include "media_output.h"
 #include <algorithm>
 #include <chrono>
+#include <cctype>
 #include <cstring>
 #include <filesystem>
 #include <mutex>
@@ -51,6 +52,9 @@ ClipMetadata ClipWriter::Write(const std::string& outputPath,
     if (videoPackets.empty()) throw std::invalid_argument("cannot write a clip without video packets");
     if (!width || !height || !fps) throw std::invalid_argument("invalid video dimensions or frame rate");
     std::filesystem::path path = std::filesystem::u8path(outputPath);
+#ifdef _WIN32
+    path = WindowsFilePath(path);
+#endif
     if (!path.parent_path().empty()) std::filesystem::create_directories(path.parent_path());
 
     ClipMetadata meta{outputPath, gameName, 0, width, height, fps, 0};
@@ -300,8 +304,20 @@ std::string ClipWriter::GenerateClipPath(const std::string& baseDir, const std::
 #endif
     char stamp[32];
     std::strftime(stamp, sizeof(stamp), "%Y-%m-%d_%H-%M-%S", &local);
-    std::string safe = gameName.empty() ? "Unknown" : gameName;
-    for (char& c : safe) if (c == '<' || c == '>' || c == ':' || c == '"' || c == '/' || c == '\\' || c == '|' || c == '?' || c == '*') c = '_';
+    std::string safe = gameName;
+    safe.erase(0, safe.find_first_not_of(" \t\r\n"));
+    safe.erase(safe.find_last_not_of(" \t\r\n") + 1);
+    for (char& c : safe) if (static_cast<unsigned char>(c) < 32 ||
+        c == '<' || c == '>' || c == ':' || c == '"' || c == '/' || c == '\\' || c == '|' || c == '?' || c == '*') c = '_';
+    // Windows drops trailing dots and spaces itself; match gameFolderName.
+    safe.erase(safe.find_last_not_of(". ") + 1);
+    if (safe.empty() || safe == "." || safe == "..") safe = "Unknown";
+    auto device = safe.substr(0, safe.find('.'));
+    std::transform(device.begin(), device.end(), device.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+    if (device == "con" || device == "prn" || device == "aux" || device == "nul" ||
+        (device.size() == 4 && (device.substr(0, 3) == "com" || device.substr(0, 3) == "lpt") && device[3] >= '0' && device[3] <= '9') ||
+        (device.size() == 5 && (device.substr(0, 3) == "com" || device.substr(0, 3) == "lpt") &&
+            (device.substr(3) == "\xC2\xB9" || device.substr(3) == "\xC2\xB2" || device.substr(3) == "\xC2\xB3"))) safe.insert(safe.begin(), '_');
     const auto dir = std::filesystem::u8path(baseDir) / std::filesystem::u8path(safe);
     static std::mutex pathMutex;
     static std::string reservedStamp;
@@ -311,8 +327,15 @@ std::string ClipWriter::GenerateClipPath(const std::string& baseDir, const std::
     for (uint32_t counter = 1;; ++counter) {
         const auto name = std::string(stamp) + (counter == 1 ? "" : "_" + std::to_string(counter)) + ".mp4";
         const auto candidate = dir / std::filesystem::u8path(name);
-        if (!std::filesystem::exists(candidate) && std::find(reserved.begin(), reserved.end(), candidate) == reserved.end()) {
-            reserved.push_back(candidate); return candidate.string();
+#ifdef _WIN32
+        const auto diskCandidate = WindowsFilePath(candidate);
+#else
+        const auto& diskCandidate = candidate;
+#endif
+        if (!std::filesystem::exists(diskCandidate) && std::find(reserved.begin(), reserved.end(), candidate) == reserved.end()) {
+            reserved.push_back(candidate);
+            const auto utf8 = candidate.u8string();
+            return {utf8.begin(), utf8.end()};
         }
     }
 }

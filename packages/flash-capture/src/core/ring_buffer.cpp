@@ -14,6 +14,17 @@ RingBuffer::~RingBuffer() = default;
 void RingBuffer::Push(const EncodedPacket& packet) {
     std::lock_guard<std::mutex> lock(mutex_);
 
+    // A long suspend produces no packets. Keeping the preceding GOP lets Flush
+    // walk back across the gap and turn a fresh save into an hours-long clip.
+    if (count_ && capacity_) {
+        const size_t newest = (writePos_ + capacity_ - 1) % capacity_;
+        if (packet.pts_us - packets_[newest].pts_us >
+            static_cast<int64_t>(maxDurationSeconds_) * 1000000) {
+            count_ = 0;
+            writePos_ = 0;
+        }
+    }
+
     packets_[writePos_] = packet;
     writePos_ = (writePos_ + 1) % capacity_;
     if (count_ < capacity_) {
@@ -21,9 +32,12 @@ void RingBuffer::Push(const EncodedPacket& packet) {
     }
 }
 
-std::vector<EncodedPacket> RingBuffer::Flush(double windowSeconds) {
+std::vector<EncodedPacket> RingBuffer::Flush(double windowSeconds, int64_t nowUs) {
     std::lock_guard<std::mutex> lock(mutex_);
     if (count_ == 0 || capacity_ == 0) return {};
+    const size_t newest = (writePos_ + capacity_ - 1) % capacity_;
+    if (nowUs && nowUs - packets_[newest].pts_us >
+        static_cast<int64_t>(maxDurationSeconds_) * 1000000) return {};
 
     // Copy, never move: a replay buffer keeps its history. Draining here makes a
     // second hotkey press inside the buffer window return an empty clip.

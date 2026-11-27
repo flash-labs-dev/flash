@@ -1,6 +1,7 @@
 #include "audio_capture.h"
 #include "../../core/audio_math.h"
 #include "../../core/capture_clock.h"
+#include "../../core/endpoint_recovery.h"
 #include "../../core/process_list.h"
 #include <algorithm>
 #include <chrono>
@@ -27,6 +28,7 @@ struct AudioCapture::Source {
     ComPtr<IAudioClient> client;
     ComPtr<IAudioCaptureClient> capture;
     HANDLE event = nullptr;
+    std::string deviceId;
 #endif
     std::thread thread;
     // Per source, because a source can now be stopped on its own while the
@@ -133,24 +135,31 @@ std::string Narrow(const wchar_t* text) {
 }
 #endif
 
-bool AudioCapture::InitializeEndpoint(const std::shared_ptr<Source>& source, int flow, const std::string& deviceId) {
+bool AudioCapture::InitializeEndpoint(const std::shared_ptr<Source>& source, int flow, const std::string& deviceId,
+                                      IMMDeviceEnumerator* devices) {
 #ifdef _WIN32
+    if (!devices) devices = enumerator_.Get();
     HRESULT hr = E_FAIL;
     // A chosen microphone that has since been unplugged falls back to the
     // default instead of leaving the mic lane dead.
     if (flow == eCapture && !deviceId.empty()) {
         source->device.Reset();
-        hr = enumerator_->GetDevice(Widen(deviceId).c_str(), &source->device);
+        hr = devices->GetDevice(Widen(deviceId).c_str(), &source->device);
         if (SUCCEEDED(hr)) {
             DWORD state = 0;
             if (FAILED(source->device->GetState(&state)) || state != DEVICE_STATE_ACTIVE) { source->device.Reset(); hr = E_FAIL; }
         }
     }
-    if (FAILED(hr)) hr = enumerator_->GetDefaultAudioEndpoint(static_cast<EDataFlow>(flow), flow == eCapture ? eCommunications : eConsole, &source->device);
-    if (FAILED(hr)) { source->info.error = "default endpoint unavailable"; return false; }
+    if (FAILED(hr)) hr = devices->GetDefaultAudioEndpoint(static_cast<EDataFlow>(flow), flow == eCapture ? eCommunications : eConsole, &source->device);
+    if (FAILED(hr)) { source->info.error = hr == E_ACCESSDENIED ? "microphone access denied by Windows" : "default endpoint unavailable"; return false; }
     source->info.name = DeviceName(source->device.Get(), source->info.name.c_str());
+    LPWSTR endpointId = nullptr;
+    if (SUCCEEDED(source->device->GetId(&endpointId))) {
+        source->deviceId = Narrow(endpointId);
+        CoTaskMemFree(endpointId);
+    }
     hr = source->device->Activate(__uuidof(IAudioClient), CLSCTX_ALL, nullptr, reinterpret_cast<void**>(source->client.GetAddressOf()));
-    if (FAILED(hr)) { source->info.error = "audio client activation failed"; return false; }
+    if (FAILED(hr)) { source->info.error = hr == E_ACCESSDENIED ? "microphone access denied by Windows" : "audio client activation failed"; return false; }
     WAVEFORMATEX* format = nullptr; hr = source->client->GetMixFormat(&format);
     if (FAILED(hr)) { source->info.error = "mix format unavailable"; return false; }
     source->info.sampleRate = format->nSamplesPerSec; source->info.channels = format->nChannels; source->bits = format->wBitsPerSample;
@@ -158,7 +167,7 @@ bool AudioCapture::InitializeEndpoint(const std::shared_ptr<Source>& source, int
         (format->wFormatTag == WAVE_FORMAT_EXTENSIBLE && reinterpret_cast<WAVEFORMATEXTENSIBLE*>(format)->SubFormat == KSDATAFORMAT_SUBTYPE_IEEE_FLOAT);
     DWORD flags = AUDCLNT_STREAMFLAGS_EVENTCALLBACK | (flow == eRender ? AUDCLNT_STREAMFLAGS_LOOPBACK : 0);
     hr = source->client->Initialize(AUDCLNT_SHAREMODE_SHARED, flags, 10000000, 0, format, nullptr); CoTaskMemFree(format);
-    if (FAILED(hr)) { source->info.error = "audio client initialization failed"; return false; }
+    if (FAILED(hr)) { source->info.error = hr == E_ACCESSDENIED ? "microphone access denied by Windows" : "audio client initialization failed"; return false; }
     source->event = CreateEvent(nullptr, FALSE, FALSE, nullptr);
     if (!source->event || FAILED(source->client->SetEventHandle(source->event)) ||
         FAILED(source->client->GetService(__uuidof(IAudioCaptureClient), reinterpret_cast<void**>(source->capture.GetAddressOf())))) {
@@ -166,7 +175,7 @@ bool AudioCapture::InitializeEndpoint(const std::shared_ptr<Source>& source, int
     }
     source->info.available = true; source->info.error.clear(); return true;
 #else
-    (void)source; (void)flow; (void)deviceId; return false;
+    (void)source; (void)flow; (void)deviceId; (void)devices; return false;
 #endif
 }
 
@@ -274,14 +283,14 @@ void AudioCapture::BuildSources(uint32_t processId) {
             // that does not exist.
             else appendError(game->info.error);
         }
-        appendError(mic->info.error);
+        if (!mic->info.error.empty()) appendError("Microphone: " + mic->info.error);
         sources.push_back(mic);
     } else {
         // Keep the reason, otherwise a fallback to mixed is indistinguishable
         // from "not attempted".
         appendError("process loopback unavailable");
         auto mixed = std::make_shared<Source>(); mixed->info = {"game", "system", "System mix"}; InitializeEndpoint(mixed, eRender);
-        appendError(mic->info.error);
+        if (!mic->info.error.empty()) appendError("Microphone: " + mic->info.error);
         mode = "mixed"; sources = {mixed, mic};
     }
     // Only called with the scanner stopped; the lock is for the readers.
@@ -347,17 +356,18 @@ bool AudioCapture::Start(AudioCallback callback) {
     if (capturing_.exchange(true)) return false; callback_ = std::move(callback);
 #ifdef _WIN32
     {
+        std::lock_guard lifecycle(sourceLifecycleMutex_);
         std::lock_guard lock(mutex_);
         for (auto& source : sources_) if (source->info.available && source->info.enabled && SUCCEEDED(source->client->Start())) {
             source->info.active = true; source->running.store(true);
             source->thread = std::thread(&AudioCapture::CaptureLoop, this, source);
         }
     }
-    if (perApp_) {
+    {
         { std::lock_guard mix(mixMutex_); mixers_ = {}; }
         { std::lock_guard wake(scanMutex_); scanNow_ = false; }
         scanThread_ = std::thread(&AudioCapture::ScanLoop, this);
-        mixThread_ = std::thread(&AudioCapture::MixLoop, this);
+        if (perApp_) mixThread_ = std::thread(&AudioCapture::MixLoop, this);
     }
 #endif
     return true;
@@ -374,6 +384,7 @@ void AudioCapture::Stop() {
     if (mixThread_.joinable()) mixThread_.join();
     StopApps();
 #ifdef _WIN32
+    std::lock_guard lifecycle(sourceLifecycleMutex_);
     for (auto& source : sources_) { source->running.store(false); if (source->client) source->client->Stop(); if (source->event) SetEvent(source->event); }
     for (auto& source : sources_) { if (source->thread.joinable()) source->thread.join(); source->info.active = false; }
 #endif
@@ -409,13 +420,58 @@ void AudioCapture::ScanLoop() {
         processError_ = "the list of audio devices is unavailable, so no app's sound is recorded";
     }
     while (capturing_.load()) {
-        ScanOnce();
+        ScanEndpoints();
+        if (perApp_) ScanOnce();
         std::unique_lock lock(scanMutex_);
         scanWake_.wait_for(lock, std::chrono::seconds(2), [this] { return scanNow_ || !capturing_.load(); });
         scanNow_ = false;
     }
     scanEnumerator_.Reset();
     if (SUCCEEDED(apartment)) CoUninitialize();
+#endif
+}
+
+void AudioCapture::ScanEndpoints() {
+#ifdef _WIN32
+    if (!scanEnumerator_) return;
+    std::lock_guard lifecycle(sourceLifecycleMutex_);
+    for (size_t i = 0; i < sources_.size() && capturing_.load(); ++i) {
+        auto old = sources_[i];
+        const bool mic = old->info.kind == "microphone";
+        if (!mic && old->info.kind != "system") continue;
+        const EDataFlow flow = mic ? eCapture : eRender;
+        ComPtr<IMMDevice> wanted;
+        std::string chosen;
+        if (mic) { std::lock_guard lock(mutex_); chosen = micDeviceId_; }
+        if (mic && !chosen.empty() && SUCCEEDED(scanEnumerator_->GetDevice(Widen(chosen).c_str(), &wanted))) {
+            DWORD state = 0;
+            if (FAILED(wanted->GetState(&state)) || state != DEVICE_STATE_ACTIVE) wanted.Reset();
+        }
+        if (!wanted) scanEnumerator_->GetDefaultAudioEndpoint(flow, mic ? eCommunications : eConsole, &wanted);
+        std::string wantedId;
+        LPWSTR id = nullptr;
+        if (wanted && SUCCEEDED(wanted->GetId(&id))) { wantedId = Narrow(id); CoTaskMemFree(id); }
+        DWORD state = 0;
+        const HRESULT stateHr = old->device ? old->device->GetState(&state) : E_FAIL;
+        const bool invalidated = (old->info.enabled && old->info.available && !old->running.load()) ||
+            (SUCCEEDED(stateHr) && state != DEVICE_STATE_ACTIVE);
+        if (!EndpointNeedsRebuild(old->info.available, invalidated, old->deviceId, wantedId)) continue;
+        old->running.store(false);
+        if (old->event) SetEvent(old->event);
+        if (old->thread.joinable()) old->thread.join();
+        if (old->client) old->client->Stop();
+        auto next = std::make_shared<Source>();
+        next->info = old->info;
+        next->info.available = false;
+        next->info.active = false;
+        const bool opened = InitializeEndpoint(next, flow, mic ? chosen : std::string{}, scanEnumerator_.Get());
+        if (opened && next->info.enabled && SUCCEEDED(next->client->Start())) {
+            next->running.store(true);
+            next->info.active = true;
+            next->thread = std::thread(&AudioCapture::CaptureLoop, this, next);
+        }
+        { std::lock_guard lock(mutex_); sources_[i] = std::move(next); }
+    }
 #endif
 }
 
@@ -626,10 +682,15 @@ void AudioCapture::CaptureLoop(std::shared_ptr<Source> source) {
     bool anchored = false; int64_t anchorUs = 0, countedFrames = 0;
     while (capturing_.load() && source->running.load()) {
         if (WaitForSingleObject(source->event, 100) != WAIT_OBJECT_0) continue;
-        UINT32 packet = 0; source->capture->GetNextPacketSize(&packet);
+        UINT32 packet = 0;
+        HRESULT hr = source->capture->GetNextPacketSize(&packet);
+        if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { source->running.store(false); break; }
+        if (FAILED(hr)) continue;
         while (packet && capturing_.load() && source->running.load()) {
             BYTE* data = nullptr; UINT32 frames = 0; DWORD flags = 0; UINT64 position = 0;
-            HRESULT hr = source->capture->GetBuffer(&data, &frames, &flags, &position, nullptr); if (FAILED(hr)) break;
+            hr = source->capture->GetBuffer(&data, &frames, &flags, &position, nullptr);
+            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { source->running.store(false); break; }
+            if (FAILED(hr)) break;
             (void)position;  // see the timestamp note below
             std::vector<float> converted(static_cast<size_t>(frames) * source->info.channels, 0.0f);
             if (!(flags & AUDCLNT_BUFFERFLAGS_SILENT)) {
@@ -667,7 +728,12 @@ void AudioCapture::CaptureLoop(std::shared_ptr<Source> source) {
             countedFrames += frameCount;
             AudioData value{stereo.data(), frameCount, 2, 48000, startUs, source->info.id};
             if (enabled && callback_ && value.frameCount) callback_(value);
-            source->capture->ReleaseBuffer(frames); source->capture->GetNextPacketSize(&packet);
+            hr = source->capture->ReleaseBuffer(frames);
+            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { source->running.store(false); break; }
+            if (FAILED(hr)) break;
+            hr = source->capture->GetNextPacketSize(&packet);
+            if (hr == AUDCLNT_E_DEVICE_INVALIDATED) { source->running.store(false); break; }
+            if (FAILED(hr)) break;
         }
     }
     if (SUCCEEDED(apartment)) CoUninitialize();
@@ -694,6 +760,7 @@ std::vector<AudioSourceInfo> AudioCapture::ListSources() const {
 }
 
 bool AudioCapture::SetSource(const std::string& id, bool enabled, float gain) {
+    std::lock_guard lifecycle(sourceLifecycleMutex_);
     for (size_t lane = 0; lane < kMixedLanes.size(); ++lane) {
         if (id != kMixedLanes[lane]) continue;
         // On the system-mix fallback there is no such lane, and saying so would

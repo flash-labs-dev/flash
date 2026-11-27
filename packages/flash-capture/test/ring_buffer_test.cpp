@@ -74,6 +74,31 @@ int main() {
         assert(buffer.Flush().empty());
     }
 
+    // Sleep spans hours without frames. The first packet after resume must not
+    // make a save include the old keyframe and its hours-long timestamp gap.
+    {
+        RingBuffer buffer(kSeconds, kFps);
+        PushFrames(buffer, kFps);
+        EncodedPacket resumed;
+        resumed.pts_us = 3LL * 60 * 60 * 1000000;
+        resumed.isKeyframe = false;
+        buffer.Push(resumed);
+        assert(buffer.Flush().empty());
+        resumed.pts_us += 1000000;
+        resumed.isKeyframe = true;
+        buffer.Push(resumed);
+        const auto clip = buffer.Flush();
+        assert(clip.size() == 1 && clip.front().pts_us == resumed.pts_us);
+    }
+
+    // A hotkey can arrive before the first post-resume frame. Its old buffer
+    // must not be written as though it were a fresh clip.
+    {
+        RingBuffer buffer(kSeconds, kFps);
+        PushFrames(buffer, kFps);
+        assert(buffer.Flush(0.0, 3LL * 60 * 60 * 1000000).empty());
+    }
+
     // A requested save window retains the whole trailing span and starts at the
     // preceding keyframe so the result is decodable. The real guarantee is not
     // an exact duration: keyframe walk-back can add almost one GOP. Here the

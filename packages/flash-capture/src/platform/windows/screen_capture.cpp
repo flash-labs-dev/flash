@@ -3,6 +3,7 @@
 #include "frame_source.h"
 #include "png_writer.h"
 #include "color_space.h"
+#include "device_recovery.h"
 #include <algorithm>
 #include <chrono>
 #include <cstdio>
@@ -20,10 +21,6 @@ namespace flash {
 
 #ifdef _WIN32
 namespace {
-
-bool IsDeviceLost(HRESULT hr) {
-    return hr == DXGI_ERROR_DEVICE_REMOVED || hr == DXGI_ERROR_DEVICE_RESET;
-}
 
 // The CPU readback path still works, so this is not fatal, but it is much
 // slower and used to be invisible. Say why the GPU path was not set up.
@@ -152,6 +149,7 @@ private:
     bool RecreateDuplication() {
         const uint32_t previousWidth = width_;
         const uint32_t previousHeight = height_;
+        auto missingSince = std::chrono::steady_clock::time_point{};
         previousDesktopTexture_.Reset();
         int backoffMs = 100;
         while (capturing_.load()) {
@@ -165,6 +163,17 @@ private:
             const HRESULT reason = device_ ? device_->GetDeviceRemovedReason() : lastDuplicationError_;
             if (IsDeviceLost(lastDuplicationError_) || IsDeviceLost(reason)) {
                 reportError_("D3D11 device was removed or reset; pipeline rebuild required");
+                return false;
+            }
+            // Only a missing output times out. A locked screen or UAC prompt
+            // returns E_ACCESSDENIED for as long as it is up, so keep waiting.
+            const auto now = std::chrono::steady_clock::now();
+            if (lastDuplicationError_ != DXGI_ERROR_NOT_FOUND) {
+                missingSince = {};
+            } else if (missingSince == std::chrono::steady_clock::time_point{}) {
+                missingSince = now;
+            } else if (now - missingSince >= std::chrono::seconds(5)) {
+                reportError_("the captured display is unavailable");
                 return false;
             }
             std::this_thread::sleep_for(std::chrono::milliseconds(backoffMs));
@@ -191,6 +200,13 @@ private:
 #endif
 
 ScreenCapture::ScreenCapture() = default;
+bool ScreenCapture::NeedsReinitialize() const {
+#ifdef _WIN32
+    return device_ && IsDeviceLost(device_->GetDeviceRemovedReason());
+#else
+    return false;
+#endif
+}
 ScreenCapture::~ScreenCapture() {
     Stop();
 #ifdef _WIN32
@@ -468,6 +484,13 @@ void ScreenCapture::CaptureLoop() {
 
     while (capturing_.load()) {
         const auto frameStart = clock::now();
+        // WGC may keep handing back its cached last frame after a driver reset.
+        // Detect the removed shared device even when the source reports no error.
+        if (NeedsReinitialize()) {
+            SetCaptureError("D3D11 device was removed or reset; pipeline rebuild required");
+            capturing_.store(false);
+            break;
+        }
         SourceFrame frame{};
         // The source can change size under us - a game switching display mode.
         // The staging texture and the video processor are both built from these

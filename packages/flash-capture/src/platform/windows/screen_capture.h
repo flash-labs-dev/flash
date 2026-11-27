@@ -42,7 +42,8 @@ public:
 
     // Query state
     bool IsCapturing() const { return capturing_.load(); }
-    bool IsHealthy() const { return captureHealthy_.load(); }
+    bool IsHealthy() const { return captureHealthy_.load() && !NeedsReinitialize(); }
+    bool NeedsReinitialize() const override;
     std::string GetCaptureError() const;
     // Which backend is actually recording. Diagnosing a black clip is guesswork
     // without this, so the app reports it rather than making anyone infer it.

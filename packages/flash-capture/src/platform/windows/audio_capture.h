@@ -56,7 +56,8 @@ private:
     struct Source;
     // deviceId (UTF-8 endpoint id) picks a specific device; empty or unknown
     // falls back to the system default for that flow.
-    bool InitializeEndpoint(const std::shared_ptr<Source>& source, int flow, const std::string& deviceId = std::string());
+    bool InitializeEndpoint(const std::shared_ptr<Source>& source, int flow, const std::string& deviceId = std::string(),
+                            IMMDeviceEnumerator* devices = nullptr);
     static bool InitializeProcess(const std::shared_ptr<Source>& source, uint32_t processId, bool include);
     void BuildSources(uint32_t processId);
     void CaptureLoop(std::shared_ptr<Source> source);
@@ -67,6 +68,7 @@ private:
     static int MixedLaneIndex(AudioLane lane);
     void ScanLoop();
     void ScanOnce();
+    void ScanEndpoints();
     void MixLoop();
     void AppLoop(std::shared_ptr<App> app);
     void StopApps();
@@ -92,6 +94,7 @@ private:
     std::mutex scanMutex_;
     bool scanNow_ = false;                // guarded by scanMutex_
     std::mutex mixMutex_;                 // guards mixers_ and every App::lane
+    std::mutex sourceLifecycleMutex_;     // serializes endpoint rebuilds and source toggles
     std::array<LaneMixer, 3> mixers_;
 
 #ifdef _WIN32

@@ -17,6 +17,7 @@ extern "C" {
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <fcntl.h>
 #include <ctime>
 #include <mutex>
 #include <stdexcept>
@@ -62,12 +63,19 @@ public:
         if (!destination_.parent_path().empty()) std::filesystem::create_directories(destination_.parent_path());
         std::string pattern = destination + ".XXXXXX";
         std::vector<char> name(pattern.begin(), pattern.end()); name.push_back(0);
-        int fd = mkstemp(name.data()); if (fd < 0) throw std::runtime_error("Could not reserve output");
+        int fd = mkstemp(name.data());
+        if (fd < 0) { const int error = errno; throw std::runtime_error("Could not reserve output (errno " + std::to_string(error) + "): " + std::strerror(error)); }
         close(fd); partial_ = name.data();
     }
     ~OutputFile() { std::error_code ignored; std::filesystem::remove(partial_, ignored); }
     std::string Path() const { return partial_.string(); }
     void Publish() {
+        const int fd = open(partial_.c_str(), O_RDONLY);
+        if (fd < 0) throw std::runtime_error(std::string("Could not flush output: ") + std::strerror(errno));
+        const int result = fsync(fd);
+        const int error = errno;
+        close(fd);
+        if (result != 0) throw std::runtime_error(std::string("Could not flush output: ") + std::strerror(error));
         // A hard link publishes atomically without overwriting an existing clip.
         if (link(partial_.c_str(), destination_.c_str()) != 0) {
             const int error = errno;
@@ -85,6 +93,7 @@ std::string ClipPath(const std::string& directory, const std::string& game) {
     std::lock_guard lock(mutex);
     std::string safe = game.empty() ? "Unknown" : game;
     for (char& c : safe) if (std::string("<>:\"/\\|?*").find(c) != std::string::npos) c = '_';
+    if (safe == "." || safe == "..") safe = "Unknown";
     auto now = std::time(nullptr); std::tm local{}; localtime_r(&now, &local);
     char stamp[32]; std::strftime(stamp, sizeof(stamp), "%Y-%m-%d_%H-%M-%S", &local);
     static std::string previous;
@@ -481,6 +490,8 @@ void WriteLinuxPng(const std::string& path, const FrameData& source) {
     Check(avcodec_send_frame(media.codec, media.frame), "Send PNG frame");
     Check(avcodec_receive_packet(media.codec, media.packet), "Encode PNG");
     std::ofstream file(output.Path(), std::ios::binary); file.write(reinterpret_cast<const char*>(media.packet->data), media.packet->size);
-    file.close(); if (!file) throw std::runtime_error("Could not write PNG"); output.Publish();
+    file.close();
+    if (!file) { const int error = errno; throw std::runtime_error("Could not write PNG (errno " + std::to_string(error) + "): " + std::strerror(error)); }
+    output.Publish();
 }
 } // namespace flash

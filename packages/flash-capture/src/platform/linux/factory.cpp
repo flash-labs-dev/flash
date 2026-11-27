@@ -1,12 +1,28 @@
 // L1 backend: not yet compiled or run on Linux hardware.
 #include "linux_backend.h"
 #include "../../core/voice_trigger.h"
+#include <cstdlib>
+#include <string>
+#include <sys/stat.h>
 
 namespace flash {
 std::shared_ptr<VideoSource> CreateVideoSource() { return CreatePipeWireVideo(); }
 std::unique_ptr<AudioSource> CreateAudioSource() { return CreatePipeWireAudio(); }
 std::unique_ptr<ClipMuxer> CreateClipMuxer() { CheckLibavLicense(); return CreateLibavMuxer(); }
-bool PlatformSupportsPerAppAudio() { return false; }
+bool PlatformSupportsPerAppAudio() {
+    const char* runtime = std::getenv("XDG_RUNTIME_DIR");
+    const char* remote = std::getenv("PIPEWIRE_REMOTE");
+    std::string path;
+    if (remote && remote[0] == '/') path = remote;
+    else {
+        if (!runtime || !runtime[0]) return false;
+        path = runtime;
+        path += '/';
+        path += remote ? remote : "pipewire-0";
+    }
+    struct stat info {};
+    return stat(path.c_str(), &info) == 0 && S_ISSOCK(info.st_mode);
+}
 std::vector<DisplayInfo> ListPlatformDisplays() {
     // The portal chooses the source after permission. These dimensions are the
     // initial encode ceiling; PipeWire frames supply the actual source size.

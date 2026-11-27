@@ -233,8 +233,8 @@ static ExportResult EncodeClip(const std::string& inputPath, const std::string& 
         throw std::invalid_argument("export range must have a non-negative start and end after start");
 
 #ifdef _WIN32
-    const auto input = std::filesystem::u8path(inputPath);
-    const auto output = std::filesystem::u8path(outputPath);
+    const auto input = WindowsFilePath(std::filesystem::u8path(inputPath));
+    const auto output = WindowsFilePath(std::filesystem::u8path(outputPath));
     if (!std::filesystem::is_regular_file(input)) throw std::invalid_argument("input clip does not exist");
     if (SamePath(input, output)) throw std::invalid_argument("input and output clips must be different files");
     if (!output.parent_path().empty()) std::filesystem::create_directories(output.parent_path());
@@ -253,7 +253,7 @@ static ExportResult EncodeClip(const std::string& inputPath, const std::string& 
         // fails MFCreateSourceReaderFromURL outright with E_INVALIDARG.
         Check(readerAttributes->SetUINT32(MF_SOURCE_READER_ENABLE_ADVANCED_VIDEO_PROCESSING, TRUE),
             "enable advanced video processing");
-        const auto wideInput = ToWide(inputPath);
+        const auto wideInput = input.wstring();
         Check(MFCreateSourceReaderFromURL(wideInput.c_str(), readerAttributes.Get(), &reader),
             "MFCreateSourceReaderFromURL");
         Check(reader->SetStreamSelection(static_cast<DWORD>(MF_SOURCE_READER_ALL_STREAMS), FALSE), "deselect source streams");
@@ -361,21 +361,22 @@ static ExportResult EncodeClip(const std::string& inputPath, const std::string& 
             PropVariantInit(&seek);
             seek.vt = VT_I8;
             seek.hVal.QuadPart = startTicks;
-            reader->SetCurrentPosition(GUID_NULL, seek);
+            const HRESULT seekResult = reader->SetCurrentPosition(GUID_NULL, seek);
             PropVariantClear(&seek);
+            Check(seekResult, "seek audio");
             for (;;) {
                 DWORD actual = 0, flags = 0;
                 LONGLONG time = 0;
                 ComPtr<IMFSample> sample;
-                if (FAILED(reader->ReadSample(stream, 0, &actual, &flags, &time, &sample))) break;
+                Check(reader->ReadSample(stream, 0, &actual, &flags, &time, &sample), "ReadSample(audio)");
                 if (flags & MF_SOURCE_READERF_ENDOFSTREAM) break;
                 if (!sample) continue;
                 if (time >= endTicks) break;
                 ComPtr<IMFMediaBuffer> buffer;
-                if (FAILED(sample->ConvertToContiguousBuffer(&buffer))) continue;
+                Check(sample->ConvertToContiguousBuffer(&buffer), "audio sample buffer");
                 BYTE* data = nullptr;
                 DWORD length = 0;
-                if (FAILED(buffer->Lock(&data, nullptr, &length))) continue;
+                Check(buffer->Lock(&data, nullptr, &length), "lock audio sample");
                 const size_t frames = length / (kMixChannels * sizeof(float));
                 const int64_t offsetTicks = time - startTicks;
                 const size_t at = offsetTicks > 0
@@ -401,7 +402,7 @@ static ExportResult EncodeClip(const std::string& inputPath, const std::string& 
         Check(MFCreateAttributes(&writerAttributes, 1), "MFCreateAttributes(writer)");
         Check(writerAttributes->SetUINT32(MF_READWRITE_ENABLE_HARDWARE_TRANSFORMS, TRUE),
             "enable hardware transforms");
-        const auto wideOutput = ToWide(outputPath);
+        const auto wideOutput = output.wstring();
         Check(MFCreateSinkWriterFromURL(wideOutput.c_str(), nullptr, writerAttributes.Get(), &writer),
             "MFCreateSinkWriterFromURL");
         outputOpened = true;

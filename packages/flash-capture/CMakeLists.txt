@@ -170,7 +170,9 @@ endfunction()
 flash_add_test(flash_ring_buffer_test test/ring_buffer_test.cpp src/core/ring_buffer.cpp)
 flash_add_test(flash_quality_test test/quality_test.cpp)
 flash_add_test(flash_audio_track_test test/audio_track_test.cpp)
+flash_add_test(flash_endpoint_recovery_test test/endpoint_recovery_test.cpp)
 flash_add_test(flash_audio_lanes_test test/audio_lanes_test.cpp)
+flash_add_test(flash_pipewire_audio_route_test test/pipewire_audio_route_test.cpp)
 flash_add_test(flash_lane_mixer_test test/lane_mixer_test.cpp)
 flash_add_test(flash_clip_trimmer_test test/clip_trimmer_test.cpp)
 flash_add_test(flash_export_budget_test test/export_budget_test.cpp)
@@ -180,6 +182,7 @@ flash_add_test(flash_mp4_track_table_test test/mp4_track_table_test.cpp)
 flash_add_test(flash_smart_render_test test/smart_render_test.cpp)
 flash_add_test(flash_voice_trigger_test test/voice_trigger_test.cpp)
 if(WIN32)
+  flash_add_test(flash_device_recovery_test test/device_recovery_test.cpp)
   flash_add_test(flash_media_output_test
     test/media_output_test.cpp
     src/platform/windows/png_writer.cpp
