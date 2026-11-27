@@ -20,7 +20,7 @@ import {
 /* THESIS: one clip owns the window and the next is one flick away; Flash
    refuses the dark-dashboard card grid every clipper ships.
    OWN-WORLD: near-black ground, white outlined glyphs, a soft bottom scrim,
-   tall condensed Antonio capitals for titles, tracked small caps for labels,
+   Geist capitals for titles and tracked small caps for labels,
    and the theme accent only on live or engaged state.
    STORY: open Flash, the newest moment is already playing; flick through,
    star the keepers, edit or export one, find the rest in the library.

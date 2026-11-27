@@ -416,8 +416,8 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
   return (
     <div ref={scroller} className="flex-1 overflow-y-auto grain">
       <div className="flex mx-auto" style={{ maxWidth: 1080, padding: '0 40px 96px', gap: 64 }}>
-        <nav aria-label="Settings sections" className="shrink-0" style={{ width: 168, position: 'sticky', top: 0, alignSelf: 'flex-start', paddingTop: 56 }}>
-          <h1 className="display" style={{ fontSize: 56, color: 'var(--fg)', marginBottom: 28 }}>Settings</h1>
+        <nav aria-label="Settings sections" className="shrink-0" style={{ width: 192, position: 'sticky', top: 0, alignSelf: 'flex-start', paddingTop: 56 }}>
+          <h1 className="display" style={{ fontSize: 32, color: 'var(--fg)', marginBottom: 28 }}>Settings</h1>
           <ul className="flex flex-col" style={{ gap: 4 }}>
             {SECTIONS.map(section => (
               <li key={section}>

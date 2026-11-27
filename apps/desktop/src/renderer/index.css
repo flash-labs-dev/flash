@@ -1,5 +1,12 @@
 @import 'tailwindcss';
 
+@font-face {
+  font-family: 'Geist Variable';
+  src: url('../../../../assets/fonts/geist.woff2') format('woff2');
+  font-weight: 100 900;
+  font-display: swap;
+}
+
 /* Full-bleed feed world. One clip owns the window; the interface is white
    glyphs and a soft bottom scrim, and the theme accent appears only where
    something is live or engaged (recording, starred, selected, progress).
@@ -119,8 +126,8 @@
   /* "Live" green stays green on every theme; it is a status, not decoration. */
   --ok: #4ade80;
 
-  --font-display: 'Antonio Variable', 'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif;
-  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Noto Sans', Cantarell, Ubuntu, sans-serif;
+  --font-display: 'Geist Variable', system-ui, sans-serif;
+  --font-ui: 'Geist Variable', system-ui, sans-serif;
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }

@@ -534,16 +534,16 @@ function resource(packaged: string, repoRelative: string): string {
 // The toast and overlay are separate windows loaded from data URLs, so they
 // cannot reach the renderer's bundled font; embed it once, read from assets
 // (which ship with the app), and degrade to the fallback stack if it is gone.
-let antonioDataUrl: string | null = null
-function antonioFont(): string {
-  if (antonioDataUrl !== null) return antonioDataUrl
+let uiFontDataUrl: string | null = null
+function uiFont(): string {
+  if (uiFontDataUrl !== null) return uiFontDataUrl
   try {
-    antonioDataUrl = 'data:font/woff2;base64,' + readFileSync(resource('assets/fonts/antonio.woff2', 'assets/fonts/antonio.woff2')).toString('base64')
+    uiFontDataUrl = 'data:font/woff2;base64,' + readFileSync(resource('assets/fonts/geist.woff2', 'assets/fonts/geist.woff2')).toString('base64')
   } catch (error) {
-    console.warn('Could not load the display font for the toast', error)
-    antonioDataUrl = ''
+    console.warn('Could not load the Geist UI font for the toast and overlay', error)
+    uiFontDataUrl = ''
   }
-  return antonioDataUrl
+  return uiFontDataUrl
 }
 
 function loadCaptureAddon(): CaptureAddon | null {
@@ -1456,7 +1456,7 @@ function showClipNotification(durationSeconds: number) {
   notification.setAlwaysOnTop(true, 'screen-saver')
   notification.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   notification.setIgnoreMouseEvents(true, { forward: true })
-  const html = toastHtml(settings.theme, antonioFont(), durationSeconds)
+  const html = toastHtml(settings.theme, uiFont(), durationSeconds)
   notification.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   let timer: ReturnType<typeof setTimeout> | undefined
   notification.once('closed', () => {
@@ -1510,7 +1510,7 @@ function createOverlay() {
   overlayWindow.setIgnoreMouseEvents(true, { forward: true })
 
   const overlay = overlayWindow
-  const html = overlayHtml(settings.theme, antonioFont())
+  const html = overlayHtml(settings.theme, uiFont())
   overlay.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   overlay.once('ready-to-show', () => {
     if (overlay.isDestroyed() || overlayWindow !== overlay) return

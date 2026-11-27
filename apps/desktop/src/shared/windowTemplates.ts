@@ -3,9 +3,9 @@ import { getTheme, WINDOW_TOKENS } from './themes.ts'
 function style(theme: string, font: string) {
   const t = getTheme(theme)
   return `
-    @font-face{font-family:Antonio;src:url('${font}') format('woff2');font-weight:100 700;font-display:swap}
+    @font-face{font-family:Geist;src:url('${font}') format('woff2');font-weight:100 900;font-display:swap}
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif;background:transparent;color:${t.fg};overflow:hidden}
+    body{font-family:Geist,system-ui,sans-serif;background:transparent;color:${t.fg};overflow:hidden}
     .surface{background:${t.bg};border:1px solid ${t.edge};border-radius:${WINDOW_TOKENS.popover}px}
     .label{font-size:11px;font-weight:600;letter-spacing:${WINDOW_TOKENS.tracking};text-transform:uppercase}
     .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${t.accent}}
@@ -21,7 +21,7 @@ export function toastHtml(theme: string, font: string, durationSeconds: number) 
   const duration = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${style(theme, font)}
     .toast{height:72px;display:flex;align-items:center;gap:12px;padding:12px 18px;animation:enter .16s ease-out}
-    h3{font-family:Antonio,'Bahnschrift SemiCondensed','Arial Narrow',sans-serif;font-size:26px;font-weight:600;line-height:.92;letter-spacing:-.005em;text-transform:uppercase;margin-bottom:7px}
+    h3{font-family:Geist,system-ui,sans-serif;font-size:26px;font-weight:600;line-height:.92;letter-spacing:-.005em;text-transform:uppercase;margin-bottom:7px}
     .label{font-size:10px;font-variant-numeric:tabular-nums}
     @keyframes enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
   </style></head><body><div class="surface toast"><div><h3>Clip saved</h3><p class="label">${duration} saved to library</p></div></div></body></html>`

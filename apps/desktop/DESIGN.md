@@ -24,48 +24,48 @@ colors:
   live-green: "#4ade80"
 typography:
   display-hero:
-    fontFamily: "'Antonio Variable', 'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif"
+    fontFamily: "'Geist Variable', system-ui, sans-serif"
     fontSize: "clamp(64px, 17vh, 168px)"
     fontWeight: 600
     lineHeight: 0.86
     letterSpacing: "-0.005em"
     fontFeature: "\"tnum\""
   headline:
-    fontFamily: "'Antonio Variable', 'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif"
+    fontFamily: "'Geist Variable', system-ui, sans-serif"
     fontSize: "56px"
     fontWeight: 600
     lineHeight: 0.92
     letterSpacing: "-0.005em"
   title:
-    fontFamily: "'Antonio Variable', 'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif"
+    fontFamily: "'Geist Variable', system-ui, sans-serif"
     fontSize: "30px"
     fontWeight: 600
     lineHeight: 0.92
     letterSpacing: "-0.005em"
   title-sm:
-    fontFamily: "'Antonio Variable', 'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif"
+    fontFamily: "'Geist Variable', system-ui, sans-serif"
     fontSize: "24px"
     fontWeight: 600
     lineHeight: 0.92
     letterSpacing: "-0.005em"
   body:
-    fontFamily: "'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Noto Sans', Cantarell, Ubuntu, sans-serif"
+    fontFamily: "'Geist Variable', system-ui, sans-serif"
     fontSize: "13px"
     fontWeight: 400
     lineHeight: 1.6
   body-sm:
-    fontFamily: "'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Noto Sans', Cantarell, Ubuntu, sans-serif"
+    fontFamily: "'Geist Variable', system-ui, sans-serif"
     fontSize: "12px"
     fontWeight: 400
     lineHeight: 1.5
     fontFeature: "\"tnum\""
   label:
-    fontFamily: "'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Noto Sans', Cantarell, Ubuntu, sans-serif"
+    fontFamily: "'Geist Variable', system-ui, sans-serif"
     fontSize: "11px"
     fontWeight: 600
     letterSpacing: "0.14em"
   label-small:
-    fontFamily: "'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Noto Sans', Cantarell, Ubuntu, sans-serif"
+    fontFamily: "'Geist Variable', system-ui, sans-serif"
     fontSize: "10px"
     fontWeight: 600
     letterSpacing: "0.14em"
@@ -156,7 +156,7 @@ components:
 
 **Creative North Star: "The Screening Room After Midnight"**
 
-Flash is a dark room with one clip on the wall. The home screen (shown to people as Watch) gives the whole window to the newest clip, footage `contain`-fitted on pure black, and lays the interface over it as white outlined glyphs and tall condensed capitals sitting on soft gradient scrims. The next clip is one wheel flick, arrow key or J/K away, and the transition is a short rise from the direction you moved. Library and Settings are the same room with the lights half up: near-black ground with a static film-grain tile, the same Antonio capitals for names and dates, the same tracked small caps for every label.
+Flash is a dark room with one clip on the wall. The home screen (shown to people as Watch) gives the whole window to the newest clip, footage `contain`-fitted on pure black, and lays the interface over it as white outlined glyphs and Geist capitals sitting on soft gradient scrims. The next clip is one wheel flick, arrow key or J/K away, and the transition is a short rise from the direction you moved. Library and Settings are the same room with the lights half up: near-black ground with a static film-grain tile, the same Geist capitals for names and dates, the same tracked small caps for every label.
 
 The system is deliberately quiet so the footage can be loud. Neutrals carry a faint per-theme tint and are tuned per palette; the theme accent is withheld from chrome and only appears where something is live or engaged: the REC dot, a starred clip, a selected tile, an enabled toggle, a chosen dropdown option, trim handles. Density is low on Watch (one item, generous 48px gutters) and higher in Library (a 2px-seam mosaic of 16:9 tiles), but the vocabulary never changes between them.
 
@@ -164,7 +164,7 @@ Confirmed rejections, from PRODUCT.md and the build's own direction: not the dar
 
 **Key Characteristics:**
 - Footage is full-bleed and square-cornered; the interface floats over it on gradient scrims, never in boxes.
-- Two type voices: Antonio Variable capitals for what is read big (titles, dates, counts), the platform UI face for everything read small.
+- One bundled face: Geist Variable for titles, dates, counts and small UI text.
 - Every label, tab and button is 11px uppercase tracked 0.14em.
 - One outlined icon family; an "on" glyph fills rather than redraws.
 - Accent appears only on live or engaged state; six user-selectable palettes share one structure.
@@ -203,10 +203,10 @@ Six near-black palettes (Blood, Electric ultraviolet, Cobalt, Fuchsia, Deep indi
 
 ## Typography
 
-**Display Font:** Antonio Variable (bundled via @fontsource-variable/antonio; falls back to Bahnschrift SemiCondensed, Arial Narrow)
-**Body Font:** Segoe UI Variable Text (with Segoe UI, system-ui, Noto Sans, Cantarell, Ubuntu)
+**Display Font:** Geist Variable (one bundled face; falls back to system-ui, sans-serif)
+**Body Font:** Geist Variable (the same bundled face; falls back to system-ui, sans-serif)
 
-**Character:** A tall condensed poster capital for names, dates and numbers against a plain, native UI face for everything else. The UI face is the platform's own because Flash ships on Windows and Linux; only the display face is bundled.
+**Character:** One bundled Geist face serves names, dates, numbers and UI text on Windows and Linux.
 
 ### Hierarchy
 - **Display Hero** (600, clamp(64px, 17vh, 168px), line-height 0.86; drops to clamp(48px, 9vh, 96px) above 14 characters): the clip title on Watch, low-left on the bottom scrim, with a 0 2px 30px shadow. Empty states use fixed 84 to 96px.
@@ -218,7 +218,7 @@ Six near-black palettes (Blood, Electric ultraviolet, Cobalt, Fuchsia, Deep indi
 - **Label** (600, 11px, 0.14em, uppercase): every button, tab, game name and status in the system; 10px in small buttons and tile game names, 10.5px in audio-lane names.
 
 ### Named Rules
-**The Two Voices Rule.** Antonio is for words read at a distance (titles, dates, counts) and is always uppercase, weight 600, with tabular numerals. Everything read up close is the system face. Never set a paragraph, a button or a form value in Antonio.
+**The One Face Rule.** Geist is the one bundled face for titles, dates, counts, paragraphs, buttons and form values. Titles, dates and counts retain their uppercase styling, weight 600 and tabular numerals.
 
 **The Tracked Caps Rule.** Labels are 11px, weight 600, tracked 0.14em, uppercase, and go no smaller than 10px. Numbers in metadata use tabular figures so timecodes do not jitter while playing.
 
@@ -266,10 +266,10 @@ Outlined, tracked, quiet; the one filled button is the reason you are on the scr
 
 ### Navigation
 - **Tabs:** text only, label type, ash-3 at rest, ash on hover, bone white when current with a 1px white underline flush to the baseline. Optional count in 10px ash-faint tabular figures. Used for top navigation (Watch, Library, Settings), game filters, sort order, editor speed and the Settings section rail.
-- **Title bar:** 48px, transparent with no rule over media, ground with an edge-soft rule elsewhere. Logo and wordmark (Antonio 21px, 0.04em), tabs 24px apart, then status on the right: detected game, REC pill, hotkey keycap, and custom window controls (48px wide, close turns alert on hover).
+- **Title bar:** 48px, transparent with no rule over media, ground with an edge-soft rule elsewhere. Logo and wordmark (Geist 21px, 0.04em), tabs 24px apart, then status on the right: detected game, REC pill, hotkey keycap, and custom window controls (48px wide, close turns alert on hover).
 
 ### Action Rail (signature)
-A vertical stack on Watch's right edge: one 30px outlined glyph (1.4 stroke) per action with a tracked label under it, 64px columns, 10px apart, then a hairline divider, previous/next chevrons and a big Antonio position counter over "of N". Glyphs scale to 1.08 on hover and 0.92 on press (160ms). Starred fills the glyph in the accent and plays the star pop, the one engaged moment that moves; Delete turns alert on hover.
+A vertical stack on Watch's right edge: one 30px outlined glyph (1.4 stroke) per action with a tracked label under it, 64px columns, 10px apart, then a hairline divider, previous/next chevrons and a big Geist position counter over "of N". Glyphs scale to 1.08 on hover and 0.92 on press (160ms). Starred fills the glyph in the accent and plays the star pop, the one engaged moment that moves; Delete turns alert on hover.
 
 ### REC Pill
 28px pill, label type. Idle: hairline border, hollow 8px ring, ash label "IDLE". Live: accent-wash fill, accent-line border, solid accent dot pulsing over 1.6s, bone-white "REC". Saving uses a 7px accent dot pulsing at 0.8s beside "SAVING CLIP".
@@ -287,12 +287,12 @@ A vertical stack on Watch's right edge: one 30px outlined glyph (1.4 stroke) per
 - **Gain slider:** 2px track, white fill over edge, 12px thumb, max 112px wide; used for volume, audio lanes and settings.
 
 ### Library Tile (signature)
-16:9, square, panel placeholder, footage cover-fitted. A 62% bottom scrim carries a 24px Antonio heading and a 10px game label with duration. Hovering plays the clip silently and zooms it to 1.025 over 420ms. Star and delete glyph chips appear top-right on hover, focus or selection; a starred clip keeps a static accent star there. A 22px square checkbox appears top-left (accent fill with a check when selected). Selected draws a 2px inset accent border; keyboard focus draws a 2px inset white border.
+16:9, square, panel placeholder, footage cover-fitted. A 62% bottom scrim carries a 24px Geist heading and a 10px game label with duration. Hovering plays the clip silently and zooms it to 1.025 over 420ms. Star and delete glyph chips appear top-right on hover, focus or selection; a starred clip keeps a static accent star there. A 22px square checkbox appears top-left (accent fill with a check when selected). Selected draws a 2px inset accent border; keyboard focus draws a 2px inset white border.
 
 ### Dialogs, Menus and the Selection Bar
-- **Dialog:** panel, 1px edge, 10px radius, 28px padding, 400 to 440px wide, title in 30px Antonio, 13px ash body, buttons right-aligned 8px apart with Cancel autofocused. Enters with an 8px rise and 0.985 scale over 160ms.
+- **Dialog:** panel, 1px edge, 10px radius, 28px padding, 400 to 440px wide, title in 30px Geist, 13px ash body, buttons right-aligned 8px apart with Cancel autofocused. Enters with an 8px rise and 0.985 scale over 160ms.
 - **Dropdown:** 6px trigger in field style; menu is panel, 8px radius, 4px padding, 12px rows at 5px radius, hover row in the panel hover tone, the chosen row bone white with an accent check.
-- **Selection bar:** floats centred 20px above the bottom of Library, panel with 10px radius, "N SELECTED" in 22px Antonio, small buttons, draggable as a whole into other apps.
+- **Selection bar:** floats centred 20px above the bottom of Library, panel with 10px radius, "N SELECTED" in 22px Geist, small buttons, draggable as a whole into other apps.
 
 ### Keycap
 22px, 4px radius, hairline border, ash 10.5px tabular text. Shows hotkeys in the title bar, empty states and the editor's in/out keys.
@@ -301,7 +301,7 @@ A vertical stack on Watch's right edge: one 30px outlined glyph (1.4 stroke) per
 
 ### Do:
 - **Do** give the current clip the whole window on pure black and layer the interface over it on gradient scrims.
-- **Do** set titles, dates and counts in Antonio Variable, 600, uppercase, tabular numerals, line-height 0.86 to 0.92.
+- **Do** set titles, dates and counts in Geist Variable, 600, uppercase, tabular numerals, line-height 0.86 to 0.92.
 - **Do** set every label, tab and button in 11px weight-600 uppercase tracked 0.14em, never below 10px.
 - **Do** draw icons from the one outlined family on a 24-unit grid at a 1.6 stroke (1.4 on the 30px rail); show "on" by filling the same glyph.
 - **Do** keep the accent for live, selected and engaged state, and define a matching on-accent ink and a distinct alert for every theme.
@@ -314,7 +314,7 @@ A vertical stack on Watch's right edge: one 30px outlined glyph (1.4 stroke) per
 - **Don't** use the accent for headings, links, section rules, resting icons or decorative fills.
 - **Don't** add neon glow, coloured shadows or angled HUD chrome; this must not read as an RGB gamer product.
 - **Don't** put a filled panel behind caption text on footage; use the scrim and a text shadow.
-- **Don't** set body copy, buttons or form values in Antonio, or bundle a second webfont for the UI face.
+- **Don't** bundle a second webfont for the UI face; use Geist for body copy, buttons and form values.
 - **Don't** give a box shadow to anything that is part of the layout.
 - **Don't** round media; tiles and video stay square-cornered.
 - **Don't** put two solid buttons in the same group; the solid one is the thing you came to do.

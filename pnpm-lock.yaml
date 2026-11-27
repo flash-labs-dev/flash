@@ -14,9 +14,6 @@ importers:
         specifier: ^6.8.11
         version: 6.8.11(supports-color@7.2.0)
     devDependencies:
-      '@fontsource-variable/antonio':
-        specifier: ^5.3.0
-        version: 5.3.0
       '@tailwindcss/postcss':
         specifier: ^4.3.3
         version: 4.3.3
@@ -505,9 +502,6 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
-
-  '@fontsource-variable/antonio@5.3.0':
-    resolution: {integrity: sha512-FQ9cRyhAHuHqeDbCh7bMeSy6Wf0mtO9BaxI1Zq9q3asJzE+4A405m7tV0ADHraVyqxUnYc5sOusH26sNzvQlRw==}
 
   '@isaacs/fs-minipass@4.0.1':
     resolution: {integrity: sha512-wgm9Ehl2jpeqP3zw/7mo3kRHFp5MEDhqAdwy1fTGkHAwnkGOVsgpvQhL8B5n1qlb01jV3n/bI0ZfZp5lWA1k4w==}
@@ -2533,8 +2527,6 @@ snapshots:
 
   '@esbuild/win32-x64@0.25.12':
     optional: true
-
-  '@fontsource-variable/antonio@5.3.0': {}
 
   '@isaacs/fs-minipass@4.0.1':
     dependencies:
