@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=Flash
+Comment=Game clip recorder
+Exec=flash
+Terminal=false
+Type=Application
+Icon=flash
+StartupWMClass=flash
+Categories=AudioVideo;Video;
+X-KDE-Wayland-Interfaces=zkde_screencast_unstable_v1,org_kde_plasma_window_management

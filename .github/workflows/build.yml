@@ -49,7 +49,7 @@ jobs:
       - name: Install native build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y build-essential cmake pkg-config libpipewire-0.3-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libglib2.0-dev libva-dev libopenh264-dev nasm zlib1g-dev patchelf libfuse2
+          sudo apt-get install -y build-essential cmake pkg-config libpipewire-0.3-dev libavcodec-dev libavformat-dev libavutil-dev libswscale-dev libswresample-dev libglib2.0-dev libva-dev libopenh264-dev libwayland-dev nasm zlib1g-dev patchelf libfuse2
       - run: bash scripts/build-linux-media.sh
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @flash/capture run build

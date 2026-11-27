@@ -18,7 +18,9 @@
     "protocols": [
       {
         "name": "Flash",
-        "schemes": ["flash"]
+        "schemes": [
+          "flash"
+        ]
       }
     ],
     "directories": {
@@ -116,7 +118,6 @@
     }
   },
   "devDependencies": {
-    "@fontsource-variable/antonio": "^5.3.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/vite": "^4.0.0",
     "@types/react": "^19.0.0",
@@ -134,6 +135,7 @@
   },
   "desktopName": "flash.desktop",
   "dependencies": {
+    "@fontsource-variable/geist": "5.3.0",
     "electron-updater": "^6.8.11"
   }
 }

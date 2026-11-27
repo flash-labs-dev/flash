@@ -3,11 +3,11 @@ import { getTheme, WINDOW_TOKENS } from './themes.ts'
 function style(theme: string, font: string) {
   const t = getTheme(theme)
   return `
-    @font-face{font-family:Antonio;src:url('${font}') format('woff2');font-weight:100 700;font-display:swap}
+    @font-face{font-family:Geist;src:url('${font}') format('woff2');font-weight:100 900;font-display:swap}
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:'Segoe UI Variable Text','Segoe UI',system-ui,sans-serif;background:transparent;color:${t.fg};overflow:hidden}
+    body{font-family:Geist,system-ui,sans-serif;background:transparent;color:${t.fg};overflow:hidden}
     .surface{background:${t.bg};border:1px solid ${t.edge};border-radius:${WINDOW_TOKENS.popover}px}
-    .label{font-size:11px;font-weight:600;letter-spacing:${WINDOW_TOKENS.tracking};text-transform:uppercase}
+    .label{font-size:11px;font-weight:600}
     .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${t.accent}}
     .dot.idle{background:${t.muted}}
     .dot.live{animation:pulse 1.6s ease-in-out infinite}
@@ -16,15 +16,29 @@ function style(theme: string, font: string) {
   `
 }
 
-export function toastHtml(theme: string, font: string, durationSeconds: number) {
+const escapeHtml = (text: string) => text.replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`)
+
+// Slides in from, and back out to, the screen edge nearest its corner.
+export function toastHtml(theme: string, font: string, durationSeconds: number, game = '', position = 'top-left') {
+  const t = getTheme(theme)
   const seconds = Math.max(0, Math.floor(durationSeconds))
   const duration = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+  const meta = game && game !== 'Unknown' ? `${duration} · ${escapeHtml(game)}` : duration
+  const away = position.endsWith('right') ? 'calc(100% + 24px)' : 'calc(-100% - 24px)'
   return `<!DOCTYPE html><html><head><meta charset="utf-8"><style>${style(theme, font)}
-    .toast{height:72px;display:flex;align-items:center;gap:12px;padding:12px 18px;animation:enter .16s ease-out}
-    h3{font-family:Antonio,'Bahnschrift SemiCondensed','Arial Narrow',sans-serif;font-size:26px;font-weight:600;line-height:.92;letter-spacing:-.005em;text-transform:uppercase;margin-bottom:7px}
-    .label{font-size:10px;font-variant-numeric:tabular-nums}
-    @keyframes enter{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-  </style></head><body><div class="surface toast"><div><h3>Clip saved</h3><p class="label">${duration} saved to library</p></div></div></body></html>`
+    .toast{height:64px;display:flex;align-items:center;gap:12px;padding:0 16px;background:${t.panel};
+      animation:enter .42s cubic-bezier(.16,1,.3,1) both}
+    .toast.out{animation:leave .28s cubic-bezier(.7,0,.84,0) both}
+    .icon{display:flex;flex-shrink:0;color:#fff}
+    .text{min-width:0}
+    h3{font-size:14px;font-weight:500;letter-spacing:-.01em;line-height:18px}
+    p{font-size:12px;line-height:16px;color:${t.muted};font-variant-numeric:tabular-nums;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    @keyframes enter{from{transform:translateX(${away})}to{transform:none}}
+    @keyframes leave{to{transform:translateX(${away})}}
+  </style></head><body><div class="surface toast" id="toast">
+    <div class="icon"><svg width="22" height="25" viewBox="300 232 540 606" aria-hidden="true"><polygon points="380,250 820,250 790,350 480,350 462,430 700,430 480,820 520,560 320,560" fill="currentColor" stroke="currentColor" stroke-width="26" stroke-linejoin="round"/></svg></div>
+    <div class="text"><h3>Clip saved</h3><p>${meta}</p></div></div>
+    <script>window.leave = () => document.getElementById('toast').classList.add('out')</script></body></html>`
 }
 
 export function overlayHtml(theme: string, font: string) {

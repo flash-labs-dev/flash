@@ -1,5 +1,6 @@
 // L1 backend: not yet compiled or run on Linux hardware.
 #include "linux_backend.h"
+#include "kwin_screencast.h"
 #include "../../core/voice_trigger.h"
 
 namespace flash {
@@ -8,8 +9,10 @@ std::unique_ptr<AudioSource> CreateAudioSource() { return CreatePipeWireAudio();
 std::unique_ptr<ClipMuxer> CreateClipMuxer() { CheckLibavLicense(); return CreateLibavMuxer(); }
 bool PlatformSupportsPerAppAudio() { return false; }
 std::vector<DisplayInfo> ListPlatformDisplays() {
-    // The portal chooses the source after permission. These dimensions are the
-    // initial encode ceiling; PipeWire frames supply the actual source size.
+    // KDE Plasma lists real monitors and records the chosen one directly.
+    if (auto outputs = ListKWinOutputs(); !outputs.empty()) return outputs;
+    // Elsewhere the portal chooses the source after permission. These dimensions
+    // are the initial encode ceiling; PipeWire frames supply the actual size.
     return {{0, "Choose a screen or window (portal)", 1920, 1080, true, 60}};
 }
 struct VoiceTrigger::Impl {};

@@ -68,6 +68,7 @@ export function sanitise<T extends Record<string, unknown>>(defaults: T, parsed:
     if (key === 'bufferLength' && (typeof value !== 'number' || value < 10 || value > 300 || value % 5 !== 0)) continue
     if (key === 'autoDeleteDays' && ![0, 7, 30, 90].includes(value as number)) continue
     if (key === 'theme' && !Object.hasOwn(THEMES, value as string)) continue
+    if (key === 'captureMode' && !['game', 'screen'].includes(value as string)) continue
     if (key === 'overlayPosition' && !['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(value as string)) continue
     if (['hotkey', 'hotkeyShort', 'screenshotHotkey'].includes(key) && !(value as string).trim()) continue
 

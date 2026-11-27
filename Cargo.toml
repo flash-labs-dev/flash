@@ -1,0 +1,11 @@
+[workspace]
+resolver = "2"
+members = ["apps/flash-tauri/src-tauri"]
+
+[profile.release]
+# Small binary, small footprint: the point of the rewrite.
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

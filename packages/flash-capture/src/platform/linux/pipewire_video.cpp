@@ -1,5 +1,6 @@
 // L1 backend: not yet compiled or run on Linux hardware.
 #include "linux_backend.h"
+#include "kwin_screencast.h"
 #include "../../core/capture_clock.h"
 #include <pipewire/pipewire.h>
 #include <spa/param/video/format-utils.h>
@@ -28,6 +29,12 @@ class PipeWireVideo final : public VideoSource {
     std::string error_;
     FrameCallback callback_;
     std::atomic<uint32_t> width_{1920}, height_{1080}, fps_{60};
+    uint32_t display_ = 0;
+    std::atomic<bool> retarget_{false};
+    std::string backend_ = "portal-pipewire";
+    // A window KWin refused, retried after 30 s so one transient refusal is not permanent.
+    std::string failedWindow_; int64_t failedAt_ = 0;
+    bool Refused(const std::string& uuid) const { return uuid == failedWindow_ && CaptureClockUs() - failedAt_ < 30000000; }
     pw_stream* stream_ = nullptr;
     spa_video_info_raw format_{};
     int64_t lastFrame_ = -1000000;
@@ -169,17 +176,34 @@ class PipeWireVideo final : public VideoSource {
         ended_ = false; connected_ = false; producedFrame_ = false; shmRequested_ = false;
         {
             PortalSession portal;
+            // KDE: the game window (or the chosen monitor) straight from KWin, no dialog.
+            auto kwin = std::make_unique<KWinScreencast>();
+            const uint32_t targetPid = CaptureWindowPid();
+            bool onWindow = false, useKWin = kwin->Connect();
+            if (useKWin) {
+                const auto uuid = kwin->WindowForPid(targetPid);
+                onWindow = !uuid.empty() && !Refused(uuid) && kwin->StreamWindow(uuid);
+                if (!uuid.empty() && !onWindow && !Refused(uuid)) { failedWindow_ = uuid; failedAt_ = CaptureClockUs(); }
+                if (!onWindow) {
+                    if (!uuid.empty()) { kwin = std::make_unique<KWinScreencast>(); useKWin = kwin->Connect(); }
+                    useKWin = useKWin && kwin->StreamOutput(display_);
+                }
+                if (!useKWin) kwin.reset();
+            }
+            const std::string target = useKWin ? kwin->Serial() : std::string{};
+            { std::lock_guard lock(mutex_); backend_ = useKWin ? (onWindow ? "kwin-window" : "kwin-screen") : "portal-pipewire"; }
             try {
-                portal.Open(cancel_);
+                if (!useKWin) portal.Open(cancel_);
                 pw_init(nullptr, nullptr);
                 loop = pw_main_loop_new(nullptr);
                 if (!loop) throw std::runtime_error("Could not create PipeWire loop");
                 pwContext = pw_context_new(pw_main_loop_get_loop(loop), nullptr, 0);
                 if (!pwContext) throw std::runtime_error("Could not create PipeWire context");
-                core = pw_context_connect_fd(pwContext, portal.TakeFd(), nullptr, 0);
-                if (!core) throw std::runtime_error("Could not connect to portal PipeWire remote");
+                core = useKWin ? pw_context_connect(pwContext, nullptr, 0) : pw_context_connect_fd(pwContext, portal.TakeFd(), nullptr, 0);
+                if (!core) throw std::runtime_error("Could not connect to the PipeWire remote");
                 auto* properties = pw_properties_new(PW_KEY_MEDIA_TYPE, "Video", PW_KEY_MEDIA_CATEGORY, "Capture", nullptr);
-                if (!portal.serial.empty()) pw_properties_set(properties, PW_KEY_TARGET_OBJECT, portal.serial.c_str());
+                const std::string& serial = useKWin ? target : portal.serial;
+                if (!serial.empty()) pw_properties_set(properties, PW_KEY_TARGET_OBJECT, serial.c_str());
                 stream_ = pw_stream_new(core, "Flash screen", properties);
                 if (!stream_) throw std::runtime_error("Could not create video stream");
                 static const pw_stream_events events = [] { pw_stream_events e{}; e.version = PW_VERSION_STREAM_EVENTS;
@@ -200,19 +224,36 @@ class PipeWireVideo final : public VideoSource {
                 // L1 uses mapped SHM with CPU conversion. L2 must negotiate
                 // modifiers and import DMA-BUF planes into encoder-owned NV12
                 // surfaces, preserving acquire/release fences and buffer lifetime.
-                if (pw_stream_connect(stream_, PW_DIRECTION_INPUT, portal.serial.empty() ? portal.node : PW_ID_ANY,
+                if (pw_stream_connect(stream_, PW_DIRECTION_INPUT, serial.empty() ? portal.node : PW_ID_ANY,
                     static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS),
                     params, sizeof(params) / sizeof(params[0])) < 0)
                     throw std::runtime_error("Could not connect video stream");
                 pending_ = false;
                 lastFrame_ = CaptureClockUs();
+                int64_t lastTargetCheck = CaptureClockUs();
                 while (running_ && !ended_) {
                     pw_loop_iterate(pw_main_loop_get_loop(loop), 50);
-                    if (lastFrame_ >= 0 && CaptureClockUs() - lastFrame_ > 5000000) {
+                    if (kwin && !kwin->Pump()) {  // the window closed, or KWin went away
+                        if (!kwin->Error().empty()) { std::lock_guard lock(mutex_); error_ = kwin->Error(); }
+                        ended_ = true;
+                    }
+                    // Follow the game: switch when the target changes or its window appears.
+                    if (kwin && CaptureClockUs() - lastTargetCheck > 1000000) {
+                        lastTargetCheck = CaptureClockUs();
+                        const uint32_t wanted = CaptureWindowPid();
+                        const auto uuid = wanted && !onWindow ? kwin->WindowForPid(wanted) : std::string{};
+                        if (wanted != targetPid || (!uuid.empty() && !Refused(uuid))) {
+                            retarget_ = true; break;
+                        }
+                    }
+                    // KWin sends a window's frames only when it changes, so an idle game is not a dead stream.
+                    if (!(onWindow && producedFrame_) && lastFrame_ >= 0 && CaptureClockUs() - lastFrame_ > 5000000) {
                         std::lock_guard lock(mutex_); healthy_ = false; error_ = "No PipeWire video frames for five seconds";
                     }
                 }
-                if (ended_ && running_) {
+                if (retarget_ || (ended_ && running_ && onWindow)) {
+                    retarget_ = true; retry = true;  // a closed game window falls back to the screen
+                } else if (ended_ && running_) {
                     std::lock_guard lock(mutex_);
                     if (error_.empty()) error_ = "Screen sharing ended; reconnecting";
                     retry = true;
@@ -244,6 +285,7 @@ class PipeWireVideo final : public VideoSource {
             // A session that delivered frames is a real drop, not a broken
             // restore loop. Only give up after repeated failures with no video.
             if (producedFrame_) failures = 0;
+            if (retarget_.exchange(false)) continue;  // planned switch: reconnect at once
             if (++failures > 5) {
                 std::lock_guard lock(mutex_); healthy_ = false;
                 if (error_.empty()) error_ = "Screen sharing kept ending; stopped capture";
@@ -256,8 +298,8 @@ class PipeWireVideo final : public VideoSource {
     }
 public:
     ~PipeWireVideo() override { Stop(); g_object_unref(cancel_); }
-    bool Initialize(uint32_t fps, uint32_t width, uint32_t height, uint32_t) override {
-        fps_ = fps; width_ = width; height_ = height; return fps && width && height;
+    bool Initialize(uint32_t fps, uint32_t width, uint32_t height, uint32_t display) override {
+        fps_ = fps; width_ = width; height_ = height; display_ = display; return fps && width && height;
     }
     bool Start(FrameCallback callback) override {
         Stop(); g_cancellable_reset(cancel_); callback_ = std::move(callback); lastFrame_ = -1000000;
@@ -275,7 +317,7 @@ public:
     bool IsHealthy() const override { return healthy_; }
     bool IsPending() const override { return pending_; }
     std::string GetCaptureError() const override { std::lock_guard lock(mutex_); return error_; }
-    std::string GetCaptureBackend() const override { return "portal-pipewire (L1, untested on hardware)"; }
+    std::string GetCaptureBackend() const override { std::lock_guard lock(mutex_); return backend_; }
     uint32_t GetWidth() const override { return width_; }
     uint32_t GetHeight() const override { return height_; }
     uint32_t GetOutputWidth() const override { return width_; }

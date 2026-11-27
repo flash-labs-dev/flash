@@ -67,6 +67,8 @@ const DEFAULTS = {
   voiceRawFloor: 0.30,
   voiceCooldownMs: 3000,
   displayId: 0,
+  // 'game' records only the detected game's window (KDE Plasma for now), else the display.
+  captureMode: 'game' as 'game' | 'screen',
   overlay: !(process.platform === 'linux' && process.env.XDG_SESSION_TYPE === 'wayland'),
   portalRestoreToken: '',
   overlayPosition: 'top-left' as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right',
@@ -353,6 +355,8 @@ type CaptureAddon = {
   setQuality?(options: { height: number; fps: number; bitrateKbps: number }): void
   listDisplays?(): Display[]
   setDisplay?(id: number): void
+  // Record this process's window instead of the display; 0 goes back to the display.
+  setCaptureWindow?(pid: number): void
   // All three recorded tracks at once. The engine keeps them separate so the
   // editor can mix them; this is the blanket on/off.
   setAudioTracks?(tracks: Record<AudioTrackId, boolean>): void
@@ -503,16 +507,16 @@ function resource(packaged: string, repoRelative: string): string {
 // The toast and overlay are separate windows loaded from data URLs, so they
 // cannot reach the renderer's bundled font; embed it once, read from assets
 // (which ship with the app), and degrade to the fallback stack if it is gone.
-let antonioDataUrl: string | null = null
-function antonioFont(): string {
-  if (antonioDataUrl !== null) return antonioDataUrl
+let uiFontDataUrl: string | null = null
+function uiFont(): string {
+  if (uiFontDataUrl !== null) return uiFontDataUrl
   try {
-    antonioDataUrl = 'data:font/woff2;base64,' + readFileSync(resource('assets/fonts/antonio.woff2', 'assets/fonts/antonio.woff2')).toString('base64')
+    uiFontDataUrl = 'data:font/woff2;base64,' + readFileSync(resource('assets/fonts/geist.woff2', 'assets/fonts/geist.woff2')).toString('base64')
   } catch (error) {
-    console.warn('Could not load the display font for the toast', error)
-    antonioDataUrl = ''
+    console.warn('Could not load the UI font for the toast', error)
+    uiFontDataUrl = ''
   }
-  return antonioDataUrl
+  return uiFontDataUrl
 }
 
 function loadCaptureAddon(): CaptureAddon | null {
@@ -869,7 +873,7 @@ function onClipSaved(clip: { path: string; duration: number }, game: string) {
   } catch { /* sidecar is an optimisation, not required */ }
   // The clip is already on disk; a toast that fails to draw must not turn a
   // successful save into a reported error.
-  try { showClipNotification(clip.duration) } catch (error) { console.warn('Could not show the clip toast', error) }
+  try { showClipNotification(clip.duration, game) } catch (error) { console.warn('Could not show the clip toast', error) }
   playClipSound()
   mainWindow?.webContents.send('clip-saved-refresh')
 }
@@ -1133,12 +1137,18 @@ function startGameDetection() {
         try { captureAddon?.setCurrentGame('', 0) }
         catch (error) { console.warn('Could not clear game audio target', error) }
       }
+      applyCaptureWindow()
       mainWindow?.webContents.send('game-detected', currentGame)
       updateOverlay()
     }
   }
   poll()
   gameDetectorInterval = setInterval(poll, 3000)
+}
+
+function applyCaptureWindow() {
+  try { captureAddon?.setCaptureWindow?.(settings.captureMode === 'game' ? currentGamePid : 0) }
+  catch (error) { console.warn('Could not set the capture window', error) }
 }
 
 function stopGameDetection() {
@@ -1192,7 +1202,7 @@ function captureDisplay() {
   return screen.getPrimaryDisplay()
 }
 
-function showClipNotification(durationSeconds: number) {
+function showClipNotification(durationSeconds: number, game: string) {
   if (!settings.notifications) return
 
   if (notificationWindow && !notificationWindow.isDestroyed()) {
@@ -1200,7 +1210,7 @@ function showClipNotification(durationSeconds: number) {
   }
 
   const notification = new BrowserWindow({
-    ...cornerBounds(captureDisplay().workArea, settings.overlayPosition, 280, 72),
+    ...cornerBounds(captureDisplay().workArea, settings.overlayPosition, 280, 64),
     frame: false, transparent: true, alwaysOnTop: true,
     skipTaskbar: true, resizable: false, focusable: false, show: false,
     type: 'toolbar', hasShadow: false,
@@ -1210,7 +1220,7 @@ function showClipNotification(durationSeconds: number) {
   notification.setAlwaysOnTop(true, 'screen-saver')
   notification.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   notification.setIgnoreMouseEvents(true, { forward: true })
-  const html = toastHtml(settings.theme, antonioFont(), durationSeconds)
+  const html = toastHtml(settings.theme, uiFont(), durationSeconds, game, settings.overlayPosition)
   notification.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   let timer: ReturnType<typeof setTimeout> | undefined
   notification.once('closed', () => {
@@ -1221,7 +1231,12 @@ function showClipNotification(durationSeconds: number) {
   notification.once('ready-to-show', () => {
     if (notification.isDestroyed()) return
     notification.showInactive()
-    timer = setTimeout(() => { if (!notification.isDestroyed()) notification.close() }, 3200)
+    // Play the exit animation, then close; 300 ms covers .toast.out (280 ms) in windowTemplates.
+    timer = setTimeout(() => {
+      if (notification.isDestroyed()) return
+      notification.webContents.executeJavaScript('window.leave()').catch(() => {})
+      timer = setTimeout(() => { if (!notification.isDestroyed()) notification.close() }, 300)
+    }, 3000)
   })
 }
 
@@ -1258,7 +1273,7 @@ function createOverlay() {
   overlayWindow.setIgnoreMouseEvents(true, { forward: true })
 
   const overlay = overlayWindow
-  const html = overlayHtml(settings.theme, antonioFont())
+  const html = overlayHtml(settings.theme, uiFont())
   overlay.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   overlay.once('ready-to-show', () => {
     if (overlay.isDestroyed() || overlayWindow !== overlay) return
@@ -1717,6 +1732,7 @@ function setupIPC() {
     if (changed.voicePhrase !== undefined) applyVoicePhrases()
     if (changed.voiceRawFloor !== undefined || changed.voiceCooldownMs !== undefined) applyVoiceThreshold()
     if (changed.voiceEnabled !== undefined) applyVoiceEnabled()
+    if (changed.captureMode !== undefined) applyCaptureWindow()
     if (changed.displayId !== undefined) {
       try { captureAddon?.setDisplay?.(changed.displayId); sessionDisplayId = null }
       catch (error) { settings.displayId = previousDisplay; saveSettings(); console.warn('Could not switch display', error) }

@@ -19,7 +19,8 @@ export function sortClips(clips: Clip[], sort: SortOrder): Clip[] {
 // sorted and handled in bulk.
 export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOnly, setStarredOnly, starredCount,
   sort, setSort, query, onQueryChange, storage, onOpenFolder, shortcutsEnabled, selectedIds, onToggleSelection,
-  onSelectRange, onSelectAll, onClearSelection, onOpenClip, onDeleteClip, onStarClip, suspendThumbnails, emptyHint }: {
+  onSelectRange, onSelectAll, onClearSelection, onOpenClip, onDeleteClip, onStarClip, suspendThumbnails,
+  title, captureAvailable, onRetry, hotkey, bufferLength, onSetupHotkeys }: {
   clips: Clip[]
   games: { name: string; count: number }[]
   gameFilter: string
@@ -43,7 +44,12 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
   onDeleteClip: (clip: Clip) => void
   onStarClip: (clip: Clip) => void
   suspendThumbnails: boolean
-  emptyHint: React.ReactNode
+  title: string
+  captureAvailable: boolean
+  onRetry: () => void
+  hotkey: string
+  bufferLength: number
+  onSetupHotkeys: () => void
 }) {
   const searchRef = useRef<HTMLInputElement>(null)
   const displayedIds = useMemo(() => clips.map(clip => clip.id), [clips])
@@ -77,8 +83,23 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* Filter strip: what you are looking at on the left, how it is ordered on the right. */}
-      <div className="flex items-center gap-6 shrink-0" style={{ height: 56, padding: '0 24px', borderBottom: '1px solid var(--edge-soft)' }}>
+      <h1 style={{ fontSize: 22, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--fg)', padding: '20px 24px 0' }}>{title}</h1>
+      {!captureAvailable && (
+        <div role="alert" className="flex items-center gap-3"
+          style={{ margin: '16px 24px 0', padding: '12px 12px 12px 16px', borderRadius: 8, background: 'var(--error-bg)', border: '1px solid var(--error-border)' }}>
+          <span style={{ display: 'flex', color: 'var(--alert)' }}><Icon name="alert" size={18} /></span>
+          <div className="flex-1 min-w-0">
+            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--fg)' }}>Capture engine unavailable</div>
+            <div style={{ fontSize: 13, color: 'var(--muted)' }}>The capture engine did not load, so Flash can't record yet.</div>
+          </div>
+          {/* TODO: the main process keeps no log file to open yet. */}
+          <button className="btn btn-sm" disabled title="Not available yet">View logs</button>
+          <button className="btn btn-sm btn-solid" onClick={onRetry}>Retry</button>
+        </div>
+      )}
+      {/* Filter strip: what you are looking at on the left, how it is ordered on the right.
+          Hidden until there is something to filter (games only exist once clips do). */}
+      <div className="flex items-center gap-6 shrink-0" style={{ height: 56, padding: '0 24px', borderBottom: '1px solid var(--edge-soft)', display: games.length === 0 && !query ? 'none' : undefined }}>
         <div className="flex items-center gap-5 min-w-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
           {games.length === 0 ? (
             <span className="caps" style={{ color: 'var(--muted-3)' }}>No games yet</span>
@@ -123,8 +144,8 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
                 onQueryChange('')
                 event.currentTarget.blur()
               }}
-              className="field"
-              style={{ width: 180, paddingLeft: 32, height: 32 }}
+              className="field search-field"
+              style={{ paddingLeft: 32, height: 32 }}
             />
           </label>
         </div>
@@ -132,24 +153,32 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
 
       <div className="flex-1 overflow-y-auto">
         {clips.length === 0 ? (
-          <div className="flex flex-col items-start justify-end" style={{ minHeight: 360, padding: '48px 24px' }}>
-            <h1 className="display" style={{ fontSize: 64, color: 'var(--fg)' }}>
-              {query || starredOnly || gameFilter !== 'All' ? 'Nothing matches' : 'No clips yet'}
-            </h1>
-            <div style={{ fontSize: 14, color: 'var(--muted)', marginTop: 14, maxWidth: 520, lineHeight: 1.6 }}>
-              {query || starredOnly || gameFilter !== 'All' ? (
-                <button className="btn" style={{ marginTop: 6 }} onClick={() => {
-                  onQueryChange(''); setStarredOnly(false); setGameFilter('All')
-                }}>Clear filters</button>
-              ) : emptyHint}
-            </div>
+          <div className="flex flex-col items-center justify-center text-center h-full" style={{ minHeight: 320, padding: 24 }}>
+            <span style={{ display: 'flex', color: 'var(--text-faint)' }}><Icon name="scissors" size={40} strokeWidth={1.4} /></span>
+            <h2 style={{ fontSize: 18, fontWeight: 600, color: 'var(--fg)', marginTop: 16 }}>
+              {query || gameFilter !== 'All' ? 'Nothing matches' : `No ${title === 'Library' ? 'clips' : title.toLowerCase()} yet`}
+            </h2>
+            {query || gameFilter !== 'All' ? (
+              <button className="btn btn-sm" style={{ marginTop: 14 }} onClick={() => { onQueryChange(''); setGameFilter('All') }}>Clear filters</button>
+            ) : (
+              <>
+                <p className="flex items-center gap-1.5" style={{ fontSize: 13, color: 'var(--muted)', marginTop: 6 }}>
+                  Press <kbd className="chip-key">{hotkey}</kbd> in a game to save the last {bufferLength} seconds.
+                </p>
+                <div className="flex gap-2" style={{ marginTop: 16 }}>
+                  <button className="btn btn-sm" onClick={onSetupHotkeys}>Set up hotkeys</button>
+                  {/* Videos dropped into the clips folder show up in the library. */}
+                  <button className="btn btn-sm" onClick={onOpenFolder}>Import from PC</button>
+                </div>
+              </>
+            )}
           </div>
         ) : (
           groups.map(group => (
             <section key={group.key} aria-label={group.label ?? 'Clips'}>
               {group.label && (
                 <header className="flex items-baseline gap-4" style={{ padding: '36px 24px 14px' }}>
-                  <h2 className="display" style={{ fontSize: 56, color: 'var(--fg)' }}>{group.label}</h2>
+                  <h2 className="display" style={{ fontSize: 20, color: 'var(--fg)' }}>{group.label}</h2>
                   <span className="caps" style={{ color: 'var(--muted)' }}>{group.weekday}</span>
                   <span className="tabular" style={{ fontSize: 12, color: 'var(--muted-3)' }}>
                     {group.clips.length} clip{group.clips.length === 1 ? '' : 's'}
@@ -291,9 +320,9 @@ function ClipTile({ clip, heading, selected, onClick, onToggle, onDelete, onStar
       <div className="tile-scrim" />
 
       <div className="absolute flex flex-col" style={{ left: 14, right: 14, bottom: 12, pointerEvents: 'none' }}>
-        <span className="display truncate" style={{ fontSize: 24, color: 'var(--fg)' }}>{heading}</span>
+        <span className="display truncate" style={{ fontSize: 15, color: 'var(--fg)' }}>{heading}</span>
         <span className="flex items-center gap-2 tabular" style={{ fontSize: 11, color: 'color-mix(in srgb, var(--fg) 72%, transparent)', marginTop: 5 }}>
-          <span className="caps truncate" style={{ fontSize: 10 }}>{clip.game}</span>
+          <span className="caps truncate">{clip.game}</span>
           <span aria-hidden="true">·</span>
           {clip.kind === 'shot'
             ? <span className="flex items-center gap-1"><Icon name="image" size={12} /> Screenshot</span>
