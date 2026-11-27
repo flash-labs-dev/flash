@@ -46,6 +46,7 @@ export interface Settings {
   voiceRawFloor: number
   voiceCooldownMs: number
   displayId: number
+  captureMode: 'game' | 'screen'
   overlay: boolean
   overlayPosition: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right'
   quality: string
