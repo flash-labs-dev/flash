@@ -141,6 +141,10 @@ export function useLiveMix(
     const onEnded = () => discardSources()
 
     video.addEventListener('play', onPlay)
+    // A stalled video stops its clock but Web Audio keeps running: drop the
+    // sources on `waiting` and restart from the video's time on `playing`.
+    video.addEventListener('waiting', discardSources)
+    video.addEventListener('playing', onPlay)
     video.addEventListener('pause', onPause)
     video.addEventListener('seeking', onSeeking)
     video.addEventListener('seeked', onSeeked)
@@ -153,6 +157,8 @@ export function useLiveMix(
 
     return () => {
       video.removeEventListener('play', onPlay)
+      video.removeEventListener('waiting', discardSources)
+      video.removeEventListener('playing', onPlay)
       video.removeEventListener('pause', onPause)
       video.removeEventListener('seeking', onSeeking)
       video.removeEventListener('seeked', onSeeked)

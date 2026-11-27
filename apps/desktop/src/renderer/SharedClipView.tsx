@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { SHARE_ORIGIN } from '../shared/shareLink'
 
 export interface SharedClipLink {
@@ -14,15 +14,18 @@ export function SharedClipView({ link }: { link: SharedClipLink }) {
   const [state, setState] = useState<'idle' | 'saving' | 'saved' | 'failed'>('idle')
 
   useEffect(() => setState('idle'), [safeUrl])
+  // Read after the save returns: the view may be showing another link by then.
+  const urlRef = useRef(safeUrl)
+  urlRef.current = safeUrl
 
   const save = async () => {
     if (!safeUrl || state === 'saving' || state === 'saved') return
     setState('saving')
     try {
       const result = await window.flash.saveSharedClip(safeUrl)
-      setState(result.path ? 'saved' : 'failed')
+      if (urlRef.current === safeUrl) setState(result.path ? 'saved' : 'failed')
     } catch {
-      setState('failed')
+      if (urlRef.current === safeUrl) setState('failed')
     }
   }
 

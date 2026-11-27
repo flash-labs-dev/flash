@@ -62,6 +62,7 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
   const [shareBusy, setShareBusy] = useState(false)
   const [shareResult, setShareResult] = useState<{ url: string; days: number } | null>(null)
   const [linkCopied, setLinkCopied] = useState(false)
+  const copiedTimer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const [exportLimit, setExportLimit] = useState(DEFAULT_EXPORT_LIMIT)
 
   useEffect(() => {
@@ -71,15 +72,18 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
   // The still shows on the first frame while the clip itself opens, so a flick
   // never lands on black. Neighbours are fetched ahead so the next flick is
   // covered too.
-  const still = useThumbnail(clip?.filePath, clip?.kind)
+  const still = useThumbnail(clip?.filePath, clip?.kind, true, clip?.marksSec, clip?.durationSec)
   useEffect(() => {
     for (const neighbour of [clips[index + 1], clips[index - 1], clips[index + 2]]) {
-      if (neighbour) void thumbnailFor(neighbour.filePath, neighbour.kind)
+      if (neighbour) void thumbnailFor(neighbour.filePath, neighbour.kind, neighbour.marksSec, neighbour.durationSec)
     }
   }, [clips, index])
 
   // A note describes the clip it was made on; moving on clears it.
-  useEffect(() => { setNote(null); setCopied(null); setTime(0); setDuration(clip?.durationSec ?? 0) }, [clip?.filePath])
+  useEffect(() => {
+    setNote(null); setCopied(null); setShareResult(null); setExportOpen(false); setTime(0); setDuration(clip?.durationSec ?? 0)
+    return () => clearTimeout(copiedTimer.current)
+  }, [clip?.filePath])
 
   // The element is muted and every track is mixed natively instead. A video
   // element plays only the FIRST audio track: a clip where the game was quiet
@@ -119,6 +123,11 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return
+      // While the link dialog or export menu is up, keys must not move the feed.
+      if (shareResult || exportOpen) {
+        if (event.key === 'Escape') { event.preventDefault(); setShareResult(null); setExportOpen(false) }
+        return
+      }
       const target = event.target
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
       if (event.ctrlKey || event.metaKey || event.altKey) return
@@ -130,13 +139,14 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [goNext, goPrev, onOpenLibrary, togglePlay])
+  }, [goNext, goPrev, onOpenLibrary, togglePlay, shareResult, exportOpen])
 
   // One wheel gesture moves one clip. A trackpad fires dozens of small deltas
   // per swipe, so they are summed and the feed then ignores input briefly
   // instead of skipping five clips at once.
   const wheel = useRef({ sum: 0, lockedUntil: 0 })
   const onWheel = (event: React.WheelEvent) => {
+    if (shareResult || exportOpen) return
     const now = performance.now()
     const state = wheel.current
     if (now < state.lockedUntil) return
@@ -235,9 +245,12 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
 
   const copyFile = async () => {
     if (!clip) return
-    const ok = await window.flash?.copyClipFile(clip.filePath)
+    const startedPath = clip.filePath
+    const ok = await window.flash?.copyClipFile(startedPath)
+    if (currentPathRef.current !== startedPath) return
     setCopied(ok ? 'Copied' : 'Failed')
-    setTimeout(() => setCopied(null), 1600)
+    clearTimeout(copiedTimer.current)
+    copiedTimer.current = setTimeout(() => setCopied(null), 1600)
   }
 
   if (!clip) {
@@ -400,7 +413,7 @@ export function FeedView({ clips, currentPath, onPathChange, filterLabel, onOpen
                 background: 'rgba(10,10,14,0.92)', border: '1px solid rgba(255,255,255,0.18)',
               }}>
                 <span className="caps" style={{ fontSize: 10, color: 'var(--fg)' }}>Fit under</span>
-                <Dropdown value={exportLimit} onChange={setExportLimit} title="Upload limit to fit under"
+                <Dropdown label="Upload limit" value={exportLimit} onChange={setExportLimit} title="Upload limit to fit under"
                   options={EXPORT_LIMITS} width={150} />
                 <button className="btn btn-solid" onClick={() => { setExportOpen(false); void exportCopy() }}>
                   Export copy
@@ -507,8 +520,8 @@ function FeedEmpty({ filtered, filterLabel, onClearFilters, isRecording, capture
             {!captureAvailable
               ? 'The capture engine is unavailable. Check that the native addon is built.'
               : isRecording
-                ? <>Flash is holding the last {bufferLength} seconds. Press <span className="keycap" style={{ color: 'var(--fg)' }}>{hotkey}</span> in game and the moment lands here.</>
-                : <>Start the replay buffer, then press <span className="keycap" style={{ color: 'var(--fg)' }}>{hotkey}</span> in game to keep the last {bufferLength} seconds.</>}
+                ? <>Flash is holding the last {bufferLength} seconds. {hotkey ? <>Press <span className="keycap" style={{ color: 'var(--fg)' }}>{hotkey}</span> in game and the moment lands here.</> : 'Use Save clip to keep a moment.'}</>
+                : <>Start the replay buffer, then {hotkey ? <>press <span className="keycap" style={{ color: 'var(--fg)' }}>{hotkey}</span> in game to keep the last {bufferLength} seconds.</> : 'use Save clip to keep a moment.'}</>}
           </p>
           {captureAvailable && !isRecording && (
             <div style={{ marginTop: 24 }}>

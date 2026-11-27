@@ -5,6 +5,14 @@
 // format shared with the native writer: the first three never move.
 export const AUDIO_TRACK_IDS = ['game', 'mic', 'other', 'discord', 'music'] as const
 export type AudioTrackId = typeof AUDIO_TRACK_IDS[number]
+export type AudioTracksSetting = Record<AudioTrackId, boolean>
+export const DEFAULT_AUDIO_TRACKS: AudioTracksSetting = { game: true, mic: true, other: true, discord: true, music: true }
+
+export function sanitiseAudioTracks(value: unknown, current: AudioTracksSetting = DEFAULT_AUDIO_TRACKS): AudioTracksSetting | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const source = value as Record<string, unknown>
+  return Object.fromEntries(AUDIO_TRACK_IDS.map(id => [id, typeof source[id] === 'boolean' ? source[id] : current[id]])) as AudioTracksSetting
+}
 
 // The order lanes are shown in, which is not the file order: the catch-all
 // reads better last.
@@ -51,11 +59,11 @@ function cleanList(value: unknown): string[] | undefined {
 
 // Undefined means "not usable, keep the defaults". Two empty lists are a
 // legitimate choice and are kept.
-export function sanitiseAudioLanes(value: unknown): AudioLanesSetting | undefined {
+export function sanitiseAudioLanes(value: unknown, current?: AudioLanesSetting): AudioLanesSetting | undefined {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
   const source = value as Record<string, unknown>
-  const discord = cleanList(source.discord)
-  const music = cleanList(source.music)
+  const discord = source.discord === undefined ? current?.discord : cleanList(source.discord)
+  const music = source.music === undefined ? current?.music : cleanList(source.music)
   if (!discord || !music) return undefined
   // In both lists counts as Discord, the same rule the capture engine applies.
   return { discord, music: music.filter(exe => !discord.includes(exe)) }

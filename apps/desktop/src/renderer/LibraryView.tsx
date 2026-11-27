@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { clipUrl } from '../shared/editor'
+import { Dropdown } from './Dropdown'
+import type { ClipTimeRange } from '../shared/clipTime'
 import { clipDisplayTitle } from '../shared/clipTitle'
+import { normalizeClipTags } from '../shared/clipTags'
 import { type Clip, Icon, formatBytes } from './ui'
 import { useThumbnail } from './thumbnails'
 
@@ -18,9 +21,13 @@ export function sortClips(clips: Clip[], sort: SortOrder): Clip[] {
 // above. The feed is where clips are watched; this is where they are found,
 // sorted and handled in bulk.
 export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOnly, setStarredOnly, starredCount,
-  sort, setSort, query, onQueryChange, storage, onOpenFolder, shortcutsEnabled, selectedIds, onToggleSelection,
-  onSelectRange, onSelectAll, onClearSelection, onOpenClip, onDeleteClip, onStarClip, suspendThumbnails, emptyHint }: {
+  allClips, tags, tagFilter, setTagFilter, sort, setSort, dateRange, setDateRange, query, onQueryChange, storage, onOpenFolder, shortcutsEnabled, selectedIds, onToggleSelection,
+  onSelectRange, onSelectAll, onClearSelection, onOpenClip, onDeleteClip, onStarClip, onSetTags, suspendThumbnails, emptyHint }: {
   clips: Clip[]
+  allClips: Clip[]
+  tags: string[]
+  tagFilter: string
+  setTagFilter: (tag: string) => void
   games: { name: string; count: number }[]
   gameFilter: string
   setGameFilter: (game: string) => void
@@ -29,6 +36,8 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
   starredCount: number
   sort: SortOrder
   setSort: (sort: SortOrder) => void
+  dateRange: ClipTimeRange
+  setDateRange: (range: ClipTimeRange) => void
   query: string
   onQueryChange: (query: string) => void
   storage: { used: number; clips: number }
@@ -42,10 +51,35 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
   onOpenClip: (clip: Clip) => void
   onDeleteClip: (clip: Clip) => void
   onStarClip: (clip: Clip) => void
+  onSetTags: (clip: Clip, tags: string[]) => Promise<string | null>
   suspendThumbnails: boolean
   emptyHint: React.ReactNode
 }) {
   const searchRef = useRef<HTMLInputElement>(null)
+  const tagInputRef = useRef<HTMLInputElement>(null)
+  const [editingPath, setEditingPath] = useState<string | null>(null)
+  const [tagInput, setTagInput] = useState('')
+  const [tagError, setTagError] = useState('')
+  const [tagBusy, setTagBusy] = useState(false)
+  const editingClip = allClips.find(clip => clip.filePath === editingPath)
+  // Read after the save returns: the editor may have moved to another clip.
+  const editingPathRef = useRef(editingPath)
+  editingPathRef.current = editingPath
+  const tagTriggerRef = useRef<HTMLElement | null>(null)
+  const closeTagEditor = () => { setEditingPath(null); tagTriggerRef.current?.focus() }
+  useEffect(() => { if (editingClip) tagInputRef.current?.focus() }, [editingPath])
+  const saveTags = async (next: string[]) => {
+    if (!editingClip || tagBusy) return
+    const normalized = normalizeClipTags(next)
+    if (!normalized) { setTagError('Use up to 8 unique tags of 24 characters each'); return }
+    setTagBusy(true)
+    try {
+      const error = await onSetTags(editingClip, normalized)
+      if (editingPathRef.current !== editingClip.filePath) return
+      setTagError(error ?? '')
+      if (!error) { setTagInput(''); tagInputRef.current?.focus() }
+    } finally { setTagBusy(false) }
+  }
   const displayedIds = useMemo(() => clips.map(clip => clip.id), [clips])
   // Newest-first reads as a diary, so it is broken into days under big date
   // headings; the other orders are rankings and stay one continuous wall.
@@ -54,6 +88,7 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
   useEffect(() => {
     if (!shortcutsEnabled) return
     const onKeyDown = (event: KeyboardEvent) => {
+      if (document.querySelector('[role="dialog"]')) return
       const target = event.target
       const textInput = target instanceof HTMLInputElement
         || target instanceof HTMLTextAreaElement
@@ -78,8 +113,8 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
   return (
     <div className="flex-1 flex flex-col min-h-0">
       {/* Filter strip: what you are looking at on the left, how it is ordered on the right. */}
-      <div className="flex items-center gap-6 shrink-0" style={{ height: 56, padding: '0 24px', borderBottom: '1px solid var(--edge-soft)' }}>
-        <div className="flex items-center gap-5 min-w-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+      <div className="flex items-center gap-3 shrink-0" style={{ height: 56, padding: '0 16px', borderBottom: '1px solid var(--edge-soft)' }}>
+        <div className="flex items-center gap-5 min-w-0 flex-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
           {games.length === 0 ? (
             <span className="caps" style={{ color: 'var(--muted-3)' }}>No games yet</span>
           ) : games.map(game => (
@@ -98,8 +133,18 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
           </button>
         </div>
 
-        <div className="ml-auto flex items-center gap-5 shrink-0">
-          <div className="flex items-center gap-4" role="group" aria-label="Sort clips">
+        <div className="ml-auto flex items-center gap-3 shrink-0">
+          <Dropdown label="Filter by tag" value={tagFilter} onChange={setTagFilter} title="Filter by tag" width={120} options={[
+            { value: '', label: 'All tags' },
+            ...tags.map(tag => ({ value: tag.toLocaleLowerCase(), label: tag })),
+          ]} />
+          <Dropdown label="Filter by date" value={dateRange} onChange={setDateRange} title="Filter by date" width={120} options={[
+            { value: 'any', label: 'Any time' },
+            { value: 'today', label: 'Today' },
+            { value: '7days', label: 'Last 7 days' },
+            { value: '30days', label: 'Last 30 days' },
+          ]} />
+          <div className="flex items-center gap-2" role="group" aria-label="Sort clips">
             {(['Recent', 'Longest', 'Largest'] as const).map(order => (
               <button key={order} className="tab" aria-pressed={sort === order} onClick={() => setSort(order)}>
                 {order}
@@ -130,16 +175,38 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
         </div>
       </div>
 
+      {editingClip && (
+        <section aria-label={`Tags for ${clipDisplayTitle(editingClip.title)}`} className="flex flex-wrap items-center gap-2 shrink-0"
+          style={{ padding: '10px 16px', borderBottom: '1px solid var(--edge-soft)' }}
+          onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); closeTagEditor() } }}>
+          <span className="caps truncate" style={{ maxWidth: 160 }}>Tags: {clipDisplayTitle(editingClip.title)}</span>
+          {editingClip.tags.map(tag => (
+            <span key={tag} className="flex items-center gap-1" style={{ fontSize: 12 }}>
+              <span>{tag}</span>
+              <button className="tab" disabled={tagBusy} aria-label={`Remove tag ${tag}`}
+                onClick={() => void saveTags(editingClip.tags.filter(item => item !== tag))}>Remove</button>
+            </span>
+          ))}
+          <form className="flex items-center gap-2" onSubmit={event => { event.preventDefault(); void saveTags([...editingClip.tags, tagInput]) }}>
+            <input ref={tagInputRef} className="field" aria-label="New tag" placeholder="New tag" value={tagInput} readOnly={tagBusy}
+              onChange={event => { setTagInput(event.target.value); setTagError('') }} style={{ width: 135, height: 32 }} />
+            <button className="btn btn-sm" type="submit" disabled={tagBusy || !tagInput.trim()}>Add</button>
+          </form>
+          <button className="btn btn-sm" onClick={closeTagEditor}>Done</button>
+          {tagError && <span role="alert" style={{ color: 'var(--muted)', fontSize: 12 }}>{tagError}</span>}
+        </section>
+      )}
+
       <div className="flex-1 overflow-y-auto">
         {clips.length === 0 ? (
           <div className="flex flex-col items-start justify-end" style={{ minHeight: 360, padding: '48px 24px' }}>
             <h1 className="display" style={{ fontSize: 64, color: 'var(--fg)' }}>
-              {query || starredOnly || gameFilter !== 'All' ? 'Nothing matches' : 'No clips yet'}
+              {query || starredOnly || tagFilter || gameFilter !== 'All' || dateRange !== 'any' ? 'Nothing matches' : 'No clips yet'}
             </h1>
             <div style={{ fontSize: 14, color: 'var(--muted)', marginTop: 14, maxWidth: 520, lineHeight: 1.6 }}>
-              {query || starredOnly || gameFilter !== 'All' ? (
+              {query || starredOnly || tagFilter || gameFilter !== 'All' || dateRange !== 'any' ? (
                 <button className="btn" style={{ marginTop: 6 }} onClick={() => {
-                  onQueryChange(''); setStarredOnly(false); setGameFilter('All')
+                  onQueryChange(''); setStarredOnly(false); setTagFilter(''); setGameFilter('All'); setDateRange('any')
                 }}>Clear filters</button>
               ) : emptyHint}
             </div>
@@ -175,6 +242,7 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
                     onToggle={() => onToggleSelection(clip.id)}
                     onDelete={() => onDeleteClip(clip)}
                     onStar={() => onStarClip(clip)}
+                    onEditTags={() => { tagTriggerRef.current = document.activeElement as HTMLElement | null; setEditingPath(clip.filePath); setTagInput(''); setTagError('') }}
                     suspend={suspendThumbnails}
                   />
                 ))}
@@ -230,7 +298,7 @@ function tileHeading(clip: Clip): string {
   return new Date(clip.createdAt).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit', second: '2-digit' })
 }
 
-function ClipTile({ clip, heading, selected, onClick, onToggle, onDelete, onStar, suspend }: {
+function ClipTile({ clip, heading, selected, onClick, onToggle, onDelete, onStar, onEditTags, suspend }: {
   clip: Clip
   heading: string
   selected: boolean
@@ -238,6 +306,7 @@ function ClipTile({ clip, heading, selected, onClick, onToggle, onDelete, onStar
   onToggle: () => void
   onDelete: () => void
   onStar: () => void
+  onEditTags: () => void
   suspend: boolean
 }) {
   const [nearView, setNearView] = useState(false)
@@ -257,7 +326,7 @@ function ClipTile({ clip, heading, selected, onClick, onToggle, onDelete, onStar
     observer.observe(node)
     return () => observer.disconnect()
   }, [])
-  const still = useThumbnail(clip.filePath, clip.kind, nearView)
+  const still = useThumbnail(clip.filePath, clip.kind, nearView, clip.marksSec, clip.durationSec)
 
   return (
     <div ref={tileRef}
@@ -309,6 +378,8 @@ function ClipTile({ clip, heading, selected, onClick, onToggle, onDelete, onStar
         </span>
       )}
       <div className="tile-tools absolute flex items-center gap-1.5" style={{ top: 10, right: 10 }}>
+        <button className="tile-glyph" onClick={e => { e.stopPropagation(); onEditTags() }}
+          title="Edit tags" aria-label={`Edit tags for ${clip.title}`} style={{ width: 'auto', padding: '0 7px' }}>Tags</button>
         <button className="tile-glyph" data-on={clip.starred}
           onClick={e => { e.stopPropagation(); onStar() }}
           title={clip.starred ? 'Starred: kept when old clips are deleted' : 'Star this clip to keep it'}

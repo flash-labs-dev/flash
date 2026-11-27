@@ -10,11 +10,13 @@
 //
 // Keep in step with packages/flash-capture/src/buffer/clip_writer.cpp.
 
-const FORBIDDEN = /[<>:"/\\|?*]/g
+import { caseKey } from './clipsRoot.ts'
+
+const FORBIDDEN = /[<>:"/\\|?*\x00-\x1f]/g
 
 // Flash names every clip and screenshot YYYY-MM-DD_HH-MM-SS, with an optional
 // _N suffix for a second file in the same second. The auto-delete timer uses
-// this so a general folder full of the user's own videos is left alone.
+// this as one signal that a media file came from Flash.
 const FLASH_TIMESTAMP_NAME = /^\d{4}-\d{2}-\d{2}_\d{2}-\d{2}-\d{2}(?:_\d+)?\.(?:mp4|png)$/i
 
 export const sidecarPath = (filePath: string): string => `${filePath}.json`
@@ -23,8 +25,15 @@ export function isFlashClipName(fileName: string): boolean {
   return FLASH_TIMESTAMP_NAME.test(fileName)
 }
 
-export function isFlashClip(fileName: string, hasSidecar: boolean): boolean {
-  return hasSidecar || isFlashClipName(fileName)
+export function isFlashClip(fileName: string, sidecar: unknown): boolean {
+  if (sidecar === null) return isFlashClipName(fileName)
+  if (!sidecar || typeof sidecar !== 'object' || Array.isArray(sidecar)) return false
+  const metadata = sidecar as { unreadable?: boolean; duration?: unknown; game?: unknown }
+  if (metadata.unreadable || Object.keys(metadata).some(key =>
+    !['duration', 'game', 'marksSec', 'trim', 'starred', 'tags', 'cachedShare'].includes(key))) return false
+  return isFlashClipName(fileName) || (typeof metadata.duration === 'number' && Number.isFinite(metadata.duration) &&
+    metadata.duration >= 0 && typeof metadata.game === 'string' && metadata.game.length > 0) ||
+    metadata.game === 'Shared clip'
 }
 
 // birthtime is 0 on filesystems that do not record it (many Linux mounts), and
@@ -47,10 +56,13 @@ export function clipTimestamp(when: Date): string {
 // Anything Windows refuses in a path becomes an underscore rather than being
 // dropped, so two games whose names differ only in punctuation cannot collapse
 // into one folder.
-export function gameFolderName(game: string): string {
-  const trimmed = game.trim()
-  if (!trimmed) return 'Unknown'
-  return trimmed.replace(FORBIDDEN, '_')
+export function gameFolderName(game: string, platform = process.platform): string {
+  let safe = game.trim().replace(FORBIDDEN, '_')
+  // Windows silently drops trailing dots and spaces, so "R.E.P.O." has always
+  // been the folder "R.E.P.O" on disk. Keep that name, and keep it everywhere.
+  if (platform === 'win32') safe = safe.replace(/[. ]+$/, '')
+  if (!safe || safe === '.' || safe === '..') return 'Unknown'
+  return platform === 'win32' && /^(?:con|prn|aux|nul|com[0-9¹²³]|lpt[0-9¹²³])(?:\.|$)/i.test(safe) ? `_${safe}` : safe
 }
 
 // Matches the native counter exactly: the first file is bare, and only the
@@ -62,10 +74,10 @@ export function numberedName(stem: string, counter: number, extension: string): 
 // `taken` is whatever already exists in the folder. Returns the first free
 // name rather than overwriting, which is the one behaviour every caller of this
 // depends on.
-export function firstFreeName(stem: string, extension: string, taken: readonly string[]): string {
-  const used = new Set(taken.map(name => name.toLowerCase()))
+export function firstFreeName(stem: string, extension: string, taken: readonly string[], platform = process.platform): string {
+  const used = new Set(taken.map(name => caseKey(name, platform)))
   for (let counter = 1; ; counter++) {
     const candidate = numberedName(stem, counter, extension)
-    if (!used.has(candidate.toLowerCase()) && !used.has(sidecarPath(candidate).toLowerCase())) return candidate
+    if (!used.has(caseKey(candidate, platform)) && !used.has(caseKey(sidecarPath(candidate), platform))) return candidate
   }
 }

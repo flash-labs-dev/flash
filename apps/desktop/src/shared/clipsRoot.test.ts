@@ -1,7 +1,11 @@
 // Self-check for clips-folder containment. Run with:
 //   node --experimental-strip-types src/shared/clipsRoot.test.ts
 import { strict as assert } from 'node:assert'
-import { isInsideRoot as contains } from './clipsRoot.ts'
+import { isInsideRoot as contains, samePath } from './clipsRoot.ts'
+
+assert.equal(samePath('C:/Clips/Game', 'c:\\clips\\game', 'win32'), true)
+assert.equal(samePath('C:/Clips/Σ', 'c:/clips/ς', 'win32'), true)
+assert.equal(samePath('/clips/Game', '/clips/game', 'linux'), false)
 
 const isInsideRoot = (root: string, candidate: string) => contains(root, candidate, 'win32')
 
@@ -14,6 +18,7 @@ assert.equal(isInsideRoot('C:\\Clips\\', 'C:\\Clips\\a.mp4'), true)
 // must not be refused just because the settings file spells the drive letter
 // differently from the one the scan produced.
 assert.equal(isInsideRoot('C:\\Clips', 'c:/clips/GAME/a.mp4'), true)
+assert.equal(isInsideRoot('C:\\Clips\\Σ', 'c:/clips/ς/a.mp4'), true)
 assert.equal(isInsideRoot('C:/Clips', 'C:\\\\Clips\\\\a.mp4'), true)
 
 // The three things a plain startsWith gets wrong.

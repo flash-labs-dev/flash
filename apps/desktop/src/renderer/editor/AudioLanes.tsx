@@ -48,6 +48,7 @@ function TrackIcon({ id }: { id: string }) {
 
 function Waveform({ track }: { track: LiveMixTrack }) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const peaksRef = useRef(new WeakMap<Float32Array, Map<number, Float32Array>>())
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -75,7 +76,16 @@ function Waveform({ track }: { track: LiveMixTrack }) {
       }
 
       const buckets = Math.max(1, Math.floor((width + 1) / 2))
-      const peaks = reducePeaks(track.samples, buckets)
+      let byBucket = peaksRef.current.get(track.samples)
+      if (!byBucket) {
+        byBucket = new Map()
+        peaksRef.current.set(track.samples, byBucket)
+      }
+      let peaks = byBucket.get(buckets)
+      if (!peaks) {
+        peaks = reducePeaks(track.samples, buckets)
+        byBucket.set(buckets, peaks)
+      }
       // Sound is content, not a live state, so it is drawn in the interface
       // white; the accent stays reserved for recording and selection.
       context.fillStyle = styles.getPropertyValue('--muted').trim()
@@ -117,14 +127,33 @@ const LANE_GRID = '32px 84px minmax(60px, 1fr) 88px 42px'
 // showing anonymous grey bars.
 const EXPECTED_TRACKS = LANE_DISPLAY_ORDER
 
-export function AudioLanes({ tracks, gains, onGainChange, muted, onMuteToggle, loading }: {
+export function AudioLanes({ tracks, gains, onGainChange, onGainDragStart, onGainDragEnd, muted, onMuteToggle, loading }: {
   tracks: LiveMixTrack[]
   gains: Record<string, number>
   onGainChange: (id: string, gain: number) => void
+  onGainDragStart: () => void
+  onGainDragEnd: () => void
   muted: ReadonlySet<string>
   onMuteToggle: (id: string) => void
   loading?: boolean
 }) {
+  const gainDragging = useRef(false)
+  const keyEditing = useRef(false)
+  const keyCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    const finish = () => {
+      if (!gainDragging.current) return
+      gainDragging.current = false
+      onGainDragEnd()
+    }
+    window.addEventListener('pointerup', finish)
+    window.addEventListener('pointercancel', finish)
+    return () => {
+      if (keyCommitTimer.current) clearTimeout(keyCommitTimer.current)
+      window.removeEventListener('pointerup', finish)
+      window.removeEventListener('pointercancel', finish)
+    }
+  }, [onGainDragEnd])
   // Every new clip carries all five tracks and most are empty. An empty lane
   // is shown, so the layout does not jump between clips, but it is dimmed and
   // its controls are off: there is nothing in it to mute or boost.
@@ -205,6 +234,24 @@ export function AudioLanes({ tracks, gains, onGainChange, muted, onMuteToggle, l
               disabled={disabled}
               aria-label={`${laneLabel(track.id)} gain`}
               onChange={event => onGainChange(track.id, event.currentTarget.valueAsNumber)}
+              onPointerDown={() => { gainDragging.current = true; onGainDragStart() }}
+              onKeyDown={event => {
+                if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) return
+                if (keyCommitTimer.current) clearTimeout(keyCommitTimer.current)
+                if (!keyEditing.current) { keyEditing.current = true; onGainDragStart() }
+              }}
+              onKeyUp={event => {
+                if (!keyEditing.current || !['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End', 'PageUp', 'PageDown'].includes(event.key)) return
+                if (keyCommitTimer.current) clearTimeout(keyCommitTimer.current)
+                keyCommitTimer.current = setTimeout(() => { keyCommitTimer.current = null; keyEditing.current = false; onGainDragEnd() }, 400)
+              }}
+              onBlur={() => {
+                if (!keyEditing.current) return
+                if (keyCommitTimer.current) clearTimeout(keyCommitTimer.current)
+                keyCommitTimer.current = null
+                keyEditing.current = false
+                onGainDragEnd()
+              }}
               style={{ ['--filled' as string]: `${gain * 50}%` }}
             />
 

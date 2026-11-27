@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, screen, shell, dialog, clipboard, ClipboardItem, powerMonitor, protocol, net } from 'electron'
+import { app, BrowserWindow, globalShortcut, Tray, Menu, nativeImage, ipcMain, screen, shell, dialog, clipboard, ClipboardItem, powerMonitor, protocol, net, Notification } from 'electron'
 import { join, basename, dirname, extname } from 'path'
 import { release, tmpdir } from 'os'
 
@@ -8,7 +8,7 @@ protocol.registerSchemesAsPrivileged([{
   scheme: 'flash-clip',
   privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true, bypassCSP: true, corsEnabled: true },
 }])
-import { createReadStream, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs'
+import { createReadStream, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'fs'
 import { Readable } from 'stream'
 import { pathToFileURL } from 'url'
 import { createHash, randomUUID } from 'crypto'
@@ -21,18 +21,35 @@ import { getTheme } from '../shared/themes'
 import { exportSuffix, type ExportCodecChoice } from '../shared/exportLimits'
 import { resolveGameSettings, type PerGameSettings } from '../shared/perGame'
 import { resolveClipFilename, validateClipName } from '../shared/rename'
-import { clipCreatedAt, clipTimestamp, firstFreeName, gameFolderName, isFlashClip, sidecarPath } from '../shared/clipPath'
-import { migrateSidecars, readSidecar, writeSidecar, reserveOutput } from '../shared/clipFiles'
-import { isInsideRoot } from '../shared/clipsRoot'
+import { clipCreatedAt, clipTimestamp, firstFreeName, gameFolderName, isFlashClip, isFlashClipName, sidecarPath } from '../shared/clipPath'
+import { migrateSidecars, readSidecar, readSidecarCached, invalidateSidecarCache, pruneSidecarCache, writeSidecar, reserveOutput, reusableShareUrl, cachedShareMp4Url } from '../shared/clipFiles'
+import { changeClipTag, normalizeClipTags } from '../shared/clipTags'
+import { clipMarkOffsets, recordClipMark, transferClipMarks } from '../shared/clipMarks'
+import { isInsideRoot, samePath } from '../shared/clipsRoot'
+import { isStalePartialClip } from '../shared/partialClips'
 import { sanitise } from '../shared/sanitise'
-import { DEFAULT_AUDIO_LANES, type AudioLanesSetting, type AudioTrackId } from '../shared/audioLanes'
+import { saveError } from '../shared/saveError'
+import { outputSpaceError } from '../shared/outputSpace'
+import { repeatGate } from '../shared/repeatGate'
+import { publishScreenshot } from '../shared/publishScreenshot'
+import { captureInterruptionNotice } from '../shared/captureInterruption'
+import { pruneStorageClips } from '../shared/storagePrune'
+import { BatchReservations } from '../shared/batchReservations'
+import { DEFAULT_AUDIO_LANES, DEFAULT_AUDIO_TRACKS, type AudioLanesSetting, type AudioTrackId, type AudioTracksSetting } from '../shared/audioLanes'
 import { decideAutostart } from '../shared/autostart'
 import { clipPathFromUrl, captureCommand, isLinuxInfrastructure, type CaptureCommand } from '../shared/platform'
 import { FEEDBACK_ENDPOINT, validateFeedback } from '../shared/feedback'
-import { SHARE_DAYS, SHARE_MAX_BYTES, SHARE_ORIGIN, SHARE_UPLOAD_ENDPOINT, checkShareSize, parseFlashLink, shareCopyMaxBytes, shareUrlFromPath, type FlashLink } from '../shared/shareLink'
+import { SHARE_DAYS, SHARE_MAX_BYTES,SHARE_ORIGIN, SHARE_UPLOAD_ENDPOINT, checkShareSize, decideSharePreparation, parseFlashLink, shareExportMaxBytes, shareUrlFromPath, type FlashLink } from '../shared/shareLink'
+import { countMp4AudioTracks } from './mp4AudioTracks'
+import { validTrimRange } from '../shared/editor'
 import { getUpdateState, installUpdateNow, startAutoUpdate } from './updater'
 import { linuxAutostartEnabled, setLinuxAutostart, linuxProcessSnapshot } from './linux'
+import { recordCrash } from '../shared/crashLog'
+import { selectCaptureDisplay } from '../shared/displaySelection'
 
+// A monitor only observes: the default crash behaviour is unchanged.
+process.on('uncaughtExceptionMonitor', (error, origin) =>
+  recordCrash(join(app.getPath('userData'), 'crash.log'), error, origin))
 
 if (process.platform === 'linux') {
   app.setDesktopName('flash.desktop')
@@ -50,6 +67,7 @@ const DEFAULTS = {
   hotkey: 'F8',
   hotkeyShort: 'Shift+F8',
   screenshotHotkey: 'F9',
+  markHotkey: '',
   shortClipSeconds: 15,
   voiceEnabled: false,
   voicePhrase: '',
@@ -67,17 +85,20 @@ const DEFAULTS = {
   voiceRawFloor: 0.30,
   voiceCooldownMs: 3000,
   displayId: 0,
+  displayName: '',
   overlay: !(process.platform === 'linux' && process.env.XDG_SESSION_TYPE === 'wayland'),
   portalRestoreToken: '',
   overlayPosition: 'top-left' as 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right',
   quality: '1080p 60fps',
   bufferLength: 30,
   audioCapture: true,
+  audioTracks: DEFAULT_AUDIO_TRACKS as AudioTracksSetting,
   audioLanes: DEFAULT_AUDIO_LANES as AudioLanesSetting,
   micDeviceId: '',   // empty = the Windows default communications mic
   autoSave: true,
   notifications: true,
   autoDeleteDays: 0,  // 0 = never
+  maxStorageGB: 0, // 0 = no size limit
   // WHICH installer request has already been acted on for this Windows
   // account, as the marker file's modification time. Not a boolean: the app
   // cannot delete the marker (it lives in Program Files, which it may not
@@ -124,8 +145,10 @@ function saveSettings() {
     const temporary = `${settingsPath}.tmp`
     writeFileSync(temporary, JSON.stringify(settings, null, 2))
     renameSync(temporary, settingsPath)
+    return true
   } catch (error) {
     console.error('Failed to save settings', error)
+    return false
   }
 }
 
@@ -316,6 +339,7 @@ type CaptureAddon = {
   initialize(clipsDir: string, displayId?: number): { error?: string }
   startReplayBuffer(): boolean
   stopReplayBuffer(): void
+  resetReplayAfterResume?(): boolean
   // seconds omitted = the whole buffer, exactly as before.
   saveClip(seconds?: number): Promise<{ path: string; duration: number; game: string }>
   saveScreenshot(path: string): Promise<string>
@@ -340,9 +364,12 @@ type CaptureAddon = {
     recording: boolean
     bufferSeconds: number
     encoder: string
+    audioMode?: string
     captureHealthy?: boolean
     capturePending?: boolean
     captureError?: string
+    audioError?: string
+    displayId?: number
     // Which screen-capture backend is actually running. Desktop Duplication
     // cannot see a fullscreen game; knowing which one is in use turns a black
     // clip from a mystery into a one-line answer.
@@ -430,7 +457,11 @@ function configuredVoicePhrases(): string[] {
 // thought was silent.
 function applyAudioCapture() {
   const on = settings.audioCapture
-  try { captureAddon?.setAudioTracks?.({ game: on, mic: on, other: on, discord: on, music: on }) }
+  try { captureAddon?.setAudioTracks?.({
+    game: on && settings.audioTracks.game, mic: on && settings.audioTracks.mic,
+    other: on && settings.audioTracks.other, discord: on && settings.audioTracks.discord,
+    music: on && settings.audioTracks.music,
+  }) }
   catch (error) { console.warn('Could not apply audio capture setting', error) }
 }
 
@@ -555,6 +586,9 @@ interface ClipInfo {
   size: number
   createdAt: number
   starred: boolean
+  tags: string[]
+  marksSec: number[]
+  trim?: { inSec: number; outSec: number }
 }
 
 let reportedMissingClipsFolder = ''
@@ -563,6 +597,7 @@ function scanClips(): ClipInfo[] {
   const clips: ClipInfo[] = []
   const folder = activeClipsFolder()
   if (!existsSync(folder)) {
+    pruneSidecarCache(new Set())
     // An unplugged or deleted folder used to read as an empty library with no
     // explanation. Say it once per missing episode, not on every refresh.
     if (reportedMissingClipsFolder !== folder) {
@@ -578,38 +613,44 @@ function scanClips(): ClipInfo[] {
     try {
       const protectedPaths = migrateSidecars(dir)
       for (const file of readdirSync(dir)) {
-        const filePath = join(dir, file)
-        const stat = statSync(filePath)
-        if (stat.isDirectory()) {
-          scanDir(filePath, file) // subfolder name = game name
-        } else if (!file.includes('.partial.') && (file.endsWith('.mp4') || file.endsWith('.png'))) {
-          const kind = file.endsWith('.png') ? 'shot' : 'clip'
-          const name = basename(file, extname(file))
-          // Real duration comes from the sidecar written at save time; fall back to a
-          // size estimate (~2MB/s at 1080p60) for clips saved before sidecars existed.
-          const sidecar = readSidecar(filePath)
-          const estimatedSec = kind === 'shot' ? 0 : sidecar?.duration
-            ?? Math.max(1, Math.round(stat.size / (2 * 1024 * 1024)))
-          const minutes = Math.floor(estimatedSec / 60)
-          const seconds = estimatedSec % 60
-          clips.push({
-            id: filePath,
-            title: name.replace(/_/g, ' ').replace(/-/g, ' '),
-            game: sidecar?.game || game || 'Unknown',
-            kind,
-            duration: kind === 'shot' ? '—' : `${minutes}:${String(seconds).padStart(2, '0')}`,
-            durationSec: estimatedSec,
-            filePath,
-            size: stat.size,
-            createdAt: clipCreatedAt(stat),
-            starred: protectedPaths.has(filePath) || sidecar?.starred === true,
-          })
-        }
+        try {
+          const filePath = join(dir, file)
+          const stat = statSync(filePath)
+          if (stat.isDirectory()) {
+            scanDir(filePath, file) // subfolder name = game name
+          } else if (!file.includes('.partial.') && (file.endsWith('.mp4') || file.endsWith('.png'))) {
+            const kind = file.endsWith('.png') ? 'shot' : 'clip'
+            const name = basename(file, extname(file))
+            // Real duration comes from the sidecar written at save time; fall back to a
+            // size estimate (~2MB/s at 1080p60) for clips saved before sidecars existed.
+            const sidecar = readSidecarCached(filePath)
+            const estimatedSec = kind === 'shot' ? 0 : sidecar?.duration
+              ?? Math.max(1, Math.round(stat.size / (2 * 1024 * 1024)))
+            const minutes = Math.floor(estimatedSec / 60)
+            const seconds = estimatedSec % 60
+            clips.push({
+              id: filePath,
+              title: isFlashClipName(file) ? name.replace(/_/g, ' ').replace(/-/g, ' ') : name,
+              game: sidecar?.game || game || 'Unknown',
+              kind,
+              duration: kind === 'shot' ? '—' : `${minutes}:${String(seconds).padStart(2, '0')}`,
+              durationSec: estimatedSec,
+              filePath,
+              size: stat.size,
+              createdAt: clipCreatedAt(stat),
+              starred: protectedPaths.has(filePath) || sidecar?.starred === true,
+              tags: sidecar?.tags ?? [],
+              marksSec: sidecar?.marksSec ?? [],
+              trim: sidecar?.trim,
+            })
+          }
+        } catch { /* A file may be moved or deleted during this scan. Continue with its siblings. */ }
       }
     } catch { /* skip unreadable dirs */ }
   }
 
   scanDir(folder, '')
+  pruneSidecarCache(new Set(clips.map(clip => clip.filePath)))
   // Newest first
   clips.sort((a, b) => b.createdAt - a.createdAt)
   return clips
@@ -669,8 +710,10 @@ async function saveSharedClip(rawUrl: unknown): Promise<{ path?: string; error?:
     file = undefined
     renameSync(temporary, reservation.path)
     temporary = ''
-    try { writeSidecar(reservation.path, { game: 'Shared clip' }) } catch { /* sidecar is an optimisation */ }
+    try { writeSidecar(reservation.path, { game: 'Shared clip' }) }
+    catch (error) { showSaveError('clip', `Shared clip saved, but its metadata could not be saved: ${saveError(error)}`, true) }
     mainWindow?.webContents.send('clip-saved-refresh')
+    pruneStorage(reservation.path)
     return { path: reservation.path }
   } catch (error: any) {
     return { error: error?.name === 'AbortError' ? 'The shared clip download timed out' : error?.message || 'Could not save the shared clip' }
@@ -687,17 +730,25 @@ async function saveSharedClip(rawUrl: unknown): Promise<{ path?: string; error?:
 const clipDeletion = createClipDeletion({
   allowed: (filePath, intent) => {
     if (!isInsideClips(filePath) || !existsSync(filePath)) return false
+    if (intent === 'prune' && inUseClips.has(filePath)) return false
     if (migrateSidecars(dirname(filePath)).has(filePath)) return false
     const metadata = readSidecar(filePath)
     if (metadata?.unreadable) return false
     if (intent === 'manual') return true
-    if (!settings.autoDeleteDays || metadata?.starred) return false
+    if (metadata?.starred || !isFlashClip(basename(filePath), metadata)) return false
+    if (storagePruneCandidates.has(filePath)) {
+      const name = basename(filePath)
+      const stat = lstatSync(filePath)
+      return settings.maxStorageGB > 0 && stat.isFile() && !name.includes('.partial.') &&
+        !savedSinceLastPrune.has(filePath)
+    }
+    if (!settings.autoDeleteDays) return false
     // A file whose age cannot be read is never old enough to prune.
     const createdAt = clipCreatedAt(statSync(filePath))
     return createdAt > 0 && createdAt < Date.now() - settings.autoDeleteDays * 86400000
   },
   unlink: unlinkSync,
-  cleanup: filePath => { try { unlinkSync(sidecarPath(filePath)) } catch { /* No sidecar remains to remove. */ } },
+  cleanup: filePath => { invalidateSidecarCache(filePath); try { unlinkSync(sidecarPath(filePath)) } catch { /* No sidecar remains to remove. */ } },
 })
 
 function deleteClip(filePath: string, intent: 'manual' | 'prune' = 'manual'): Promise<DeleteResult> {
@@ -721,18 +772,19 @@ function renameClip(filePath: string, requestedName: string): { filePath?: strin
   const originalSidecarFilename = basename(originalSidecar)
   let existing: string[]
   try {
-    existing = readdirSync(folder).filter(filename => {
-      const lower = filename.toLowerCase()
-      return lower !== originalFilename.toLowerCase() && lower !== originalSidecarFilename.toLowerCase()
-    })
+    // Exact match only: on Linux a name differing in case is a different file.
+    existing = readdirSync(folder).filter(filename =>
+      filename !== originalFilename && filename !== originalSidecarFilename)
   } catch (error: any) {
     return { error: error?.message || 'Could not read the clips folder' }
   }
 
   const target = join(folder, resolveClipFilename(name, extension, existing))
-  if (target.toLowerCase() === filePath.toLowerCase()) return { filePath }
+  if (target === filePath) return { filePath }
   const targetSidecar = sidecarPath(target)
   const hasSidecar = existsSync(originalSidecar)
+  invalidateSidecarCache(filePath)
+  invalidateSidecarCache(target)
 
   try {
     renameSync(filePath, target)
@@ -767,7 +819,7 @@ function moveClipToGame(filePath: string, requestedGame: string): { filePath?: s
   if (extension !== '.mp4' && extension !== '.png') return { error: 'Only clips and screenshots can be moved' }
 
   const targetFolder = join(activeClipsFolder(), game)
-  if (dirname(filePath).toLowerCase() === targetFolder.toLowerCase()) return { filePath }
+  if (samePath(dirname(filePath), targetFolder, process.platform)) return { filePath }
 
   let existing: string[]
   try {
@@ -784,8 +836,11 @@ function moveClipToGame(filePath: string, requestedGame: string): { filePath?: s
   const targetSidecar = sidecarPath(target)
   const hasSidecar = existsSync(originalSidecar)
   const metadata = readSidecar(filePath)
+  invalidateSidecarCache(filePath)
+  invalidateSidecarCache(target)
   if (metadata?.unreadable) return { error: 'Could not read clip metadata' }
 
+  markClipInUse(filePath)
   try {
     renameSync(filePath, target)
     if (hasSidecar) {
@@ -810,7 +865,7 @@ function moveClipToGame(filePath: string, requestedGame: string): { filePath?: s
   } catch (error: any) {
     const busy = error?.code === 'EBUSY' || error?.code === 'EPERM'
     return { error: busy ? 'Close anything using this file, then try again' : error?.message || 'Move failed' }
-  }
+  } finally { releaseClipInUse(filePath) }
 }
 
 function moveClips(filePaths: string[], game: string): { moved: number; error?: string } {
@@ -832,6 +887,23 @@ function moveClips(filePaths: string[], game: string): { moved: number; error?: 
 // restart — on a machine that never restarts, nothing at all.
 let pruneTimer: ReturnType<typeof setInterval> | null = null
 
+function prunePartialClips() {
+  const scan = (folder: string) => {
+    try {
+      for (const entry of readdirSync(folder, { withFileTypes: true })) {
+        const filePath = join(folder, entry.name)
+        if (entry.isDirectory()) scan(filePath)
+        else if (entry.isFile()) {
+          try {
+            if (isStalePartialClip(entry.name, statSync(filePath).mtimeMs, Date.now())) unlinkSync(filePath)
+          } catch (error) { console.warn('Could not remove partial clip', filePath, error) }
+        }
+      }
+    } catch (error) { console.warn('Could not scan partial clips', folder, error) }
+  }
+  scan(activeClipsFolder())
+}
+
 function pruneOldClips() {
   if (!settings.autoDeleteDays) return
   const cutoff = Date.now() - settings.autoDeleteDays * 86400000
@@ -842,9 +914,106 @@ function pruneOldClips() {
   for (const clip of scanClips()) {
     if (clip.createdAt <= 0) continue
     if (clip.createdAt >= cutoff || clip.starred) continue
-    if (!isFlashClip(basename(clip.filePath), existsSync(sidecarPath(clip.filePath)))) continue
+    if (!isFlashClip(basename(clip.filePath), readSidecar(clip.filePath))) continue
     void deleteClip(clip.filePath, 'prune')
   }
+}
+
+const storagePruneCandidates = new Set<string>()
+const inUseClips = new Set<string>()
+const inUseCounts = new Map<string, number>()
+const batchShareClips = new BatchReservations()
+const batchShareSenders = new Set<number>()
+const editorClipSenders = new Set<number>()
+let editorClipPath: string | null = null
+let editorClipSender: number | null = null
+function markClipInUse(filePath: string) {
+  inUseCounts.set(filePath, (inUseCounts.get(filePath) ?? 0) + 1)
+  inUseClips.add(filePath)
+}
+function releaseClipInUse(filePath: string) {
+  const remaining = (inUseCounts.get(filePath) ?? 0) - 1
+  if (remaining > 0) inUseCounts.set(filePath, remaining)
+  else { inUseCounts.delete(filePath); inUseClips.delete(filePath) }
+}
+function releaseBatchShare(senderId: number, token?: string) {
+  for (const path of batchShareClips.release(senderId, token)) releaseClipInUse(path)
+}
+function releaseEditorClip(senderId: number) {
+  if (editorClipSender !== senderId) return
+  if (editorClipPath) releaseClipInUse(editorClipPath)
+  editorClipPath = null
+  editorClipSender = null
+}
+let storagePruneRunning = false
+let storagePruneRequested = false
+const savedSinceLastPrune = new Map<string, number>()
+let saveProtectionVersion = 0
+let storagePruneNotified = false
+let storageFloorNotified = false
+
+function isRegularClipFile(filePath: string): boolean {
+  try { return lstatSync(filePath).isFile() }
+  catch { return false }
+}
+
+function isManagedStorageClip(filePath: string): boolean {
+  return isRegularClipFile(filePath) &&
+    isFlashClip(basename(filePath), readSidecar(filePath))
+}
+
+function pruneStorage(savedPath?: string) {
+  if (settings.maxStorageGB <= 0) return
+  if (savedPath) savedSinceLastPrune.set(savedPath, ++saveProtectionVersion)
+  if (storagePruneRunning) { storagePruneRequested = true; return }
+  storagePruneRunning = true
+  void (async () => {
+    let removed = 0
+    let limitCannotBeMet = false
+    try {
+      do {
+        storagePruneRequested = false
+        const protectedAtStart = new Map(savedSinceLastPrune)
+        const clips = scanClips()
+        removed += await pruneStorageClips(clips.filter(clip => isManagedStorageClip(clip.filePath)).map(clip => ({
+          filePath: clip.filePath,
+          size: clip.size,
+          createdAt: clip.createdAt,
+          eligible: !clip.starred && !savedSinceLastPrune.has(clip.filePath) &&
+            !readSidecar(clip.filePath)?.unreadable,
+        })), settings.maxStorageGB * 1024 ** 3, async filePath => {
+          if (!settings.maxStorageGB) return false
+          storagePruneCandidates.add(filePath)
+          try {
+            const result = await deleteClip(filePath, 'prune')
+            return result.deleted
+          } finally {
+            storagePruneCandidates.delete(filePath)
+          }
+        }, () => { limitCannotBeMet = true })
+        for (const [filePath, version] of protectedAtStart) {
+          if (savedSinceLastPrune.get(filePath) === version) savedSinceLastPrune.delete(filePath)
+        }
+      } while (storagePruneRequested && settings.maxStorageGB > 0)
+    } catch (error) {
+      console.warn('Could not prune clips for storage limit', error)
+    } finally {
+      storagePruneRunning = false
+      if (limitCannotBeMet && !storageFloorNotified) {
+        storageFloorNotified = true
+        try { new Notification({ title: 'Flash storage limit', body: 'The limit cannot be met while starred, just-saved, and newest clips and screenshots are kept.' }).show() }
+        catch (error) { console.warn('Could not show storage notification', error) }
+      }
+      if (removed > 0) {
+        mainWindow?.webContents.send('clip-saved-refresh')
+        if (!storagePruneNotified) {
+          storagePruneNotified = true
+          try { new Notification({ title: 'Flash storage limit', body: `Removed ${removed} old clip${removed === 1 ? '' : 's'} to free space.` }).show() }
+          catch (error) { console.warn('Could not show storage notification', error) }
+        }
+      }
+    }
+  })()
 }
 
 // A 30s 1080p60 clip at 20 Mbps is ~75 MB. Refuse below a floor rather than
@@ -853,25 +1022,59 @@ const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024
 
 async function checkDiskSpace(): Promise<string | null> {
   try {
+    // The save writer recreates a deleted folder, so do the same before measuring.
+    // A missing drive still fails here with ENOENT.
+    mkdirSync(activeClipsFolder(), { recursive: true })
     const fs = await statfs(activeClipsFolder())
     const free = fs.bavail * fs.bsize
     if (free < MIN_FREE_BYTES) {
       return `Only ${(free / 1e9).toFixed(1)} GB free on the clips drive — need at least 2 GB`
     }
-  } catch { /* unsupported filesystem: let the save attempt decide */ }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT' || (error as NodeJS.ErrnoException).code === 'ENODEV') {
+      return saveError(error)
+    }
+    // Unsupported filesystem: let the save attempt decide.
+  }
   return null
 }
 
-// Both the hotkey and the renderer's save button land here.
-function onClipSaved(clip: { path: string; duration: number }, game: string) {
+async function checkDerivedOutputSpace(filePath: string, maxBytes?: number): Promise<string | null> {
+  if (process.platform !== 'win32') return null
   try {
-    writeSidecar(clip.path, { duration: clip.duration, game })
-  } catch { /* sidecar is an optimisation, not required */ }
+    const fs = await statfs(dirname(filePath))
+    const sourceBytes = statSync(filePath).size
+    return outputSpaceError(fs.bavail * fs.bsize, maxBytes === undefined ? sourceBytes : Math.min(maxBytes, sourceBytes))
+  } catch (error) {
+    return saveError(error, 'Could not check free disk space')
+  }
+}
+
+// Both the hotkey and the renderer's save button land here.
+function onClipSaved(clip: { path: string; duration: number }, game: string, saveTimeMs: number, savedMarksMs: readonly number[]) {
+  let metadataError: string | undefined
+  try {
+    writeSidecar(clip.path, { duration: clip.duration, game,
+      marksSec: clipMarkOffsets(savedMarksMs, saveTimeMs, clip.duration) })
+  } catch (error) { metadataError = `Clip saved, but its metadata could not be saved: ${saveError(error)}` }
   // The clip is already on disk; a toast that fails to draw must not turn a
   // successful save into a reported error.
   try { showClipNotification(clip.duration) } catch (error) { console.warn('Could not show the clip toast', error) }
   playClipSound()
   mainWindow?.webContents.send('clip-saved-refresh')
+  // The boundary probe evaluates this save handler by itself.
+  if (typeof pruneStorage === 'function') pruneStorage(clip.path)
+  return metadataError
+}
+
+function writeDerivedClipSidecar(sourcePath: string, outputPath: string, duration: number, startSeconds: number) {
+  const source = readSidecar(sourcePath)
+  writeSidecar(outputPath, {
+    duration,
+    game: source?.game ?? basename(dirname(sourcePath)),
+    marksSec: transferClipMarks(source?.marksSec ?? [], startSeconds, duration),
+    tags: source?.tags,
+  })
 }
 
 // Single save path for the hotkey, the tray and the renderer, so the disk check
@@ -881,6 +1084,38 @@ function onClipSaved(clip: { path: string; duration: number }, game: string) {
 // Coalesce instead: a second press while one is in flight returns that same save.
 let saveInFlight: Promise<{ path?: string; duration?: number; error?: string }> | null = null
 let saveInFlightSeconds: number | undefined
+// A timed-out request must release the UI queue, but the native writer may
+// still own its output path. Keep this guard until that promise really settles.
+let nativeSaveInFlight: Promise<{ path: string; duration: number; game: string }> | null = null
+const CLIP_SAVE_TIMEOUT_MS = 120_000
+const pendingOutputJobs = new Set<Promise<unknown>>()
+let quitAfterOutputJobs = false
+
+async function trackOutputJob<T>(job: Promise<T>): Promise<T> {
+  pendingOutputJobs.add(job)
+  try { return await job }
+  finally {
+    pendingOutputJobs.delete(job)
+    if (quitAfterOutputJobs && pendingOutputJobs.size === 0) {
+      // Let the awaiting save/export handler publish metadata and release its
+      // reservation before Electron starts shutting down.
+      setImmediate(() => {
+        if (quitAfterOutputJobs && pendingOutputJobs.size === 0) {
+          quitAfterOutputJobs = false
+          app.quit()
+        }
+      })
+    }
+  }
+}
+
+function showSaveError(kind: 'clip' | 'screenshot', message: string, mediaSaved = false) {
+  mainWindow?.webContents.send('clip-save-state', { saving: false, error: message })
+  // A window behind a fullscreen game counts as visible, so only focus proves it was seen.
+  if (mainWindow?.isFocused()) return
+  try { new Notification({ title: mediaSaved ? `Flash saved the ${kind} without metadata` : `Flash could not save the ${kind}`, body: message }).show() }
+  catch (error) { console.warn('Could not show save error notification', error) }
+}
 
 function saveClipNow(seconds?: number): Promise<{ path?: string; duration?: number; error?: string }> {
   // No argument means the whole buffer. Only a positive number is a short
@@ -902,8 +1137,13 @@ function saveClipNow(seconds?: number): Promise<{ path?: string; duration?: numb
 }
 
 async function runSaveClip(seconds?: number): Promise<{ path?: string; duration?: number; error?: string }> {
-  if (!captureAddon) return { error: 'Capture engine not available' }
-  if (!isRecording) return { error: 'Replay buffer is not running' }
+  if (nativeSaveInFlight) {
+    const message = 'The previous clip save is still writing. Try again after it finishes.'
+    showSaveError('clip', message)
+    return { error: message }
+  }
+  if (!captureAddon) { showSaveError('clip', 'Capture engine not available'); return { error: 'Capture engine not available' } }
+  if (!isRecording) { showSaveError('clip', 'Replay buffer is not running'); return { error: 'Replay buffer is not running' } }
 
   // Ask the engine rather than trusting our own flag. If capture died since the
   // last watchdog tick, the buffer holds stale frames and saving it would hand
@@ -916,14 +1156,15 @@ async function runSaveClip(seconds?: number): Promise<{ path?: string; duration?
       // Handed to the watchdog, which keeps trying to bring capture back. Left as
       // a plain stop, nothing would ever restart it and every later hotkey press
       // would report the same error.
-      setRecordingState(false, `Capture stopped: ${reason}. Retrying automatically.`, true)
-      return { error: `Capture stopped: ${reason}` }
+      const message = `Capture stopped: ${reason}. Retrying automatically.`
+      setRecordingState(false, message, true)
+      return { error: message }
     }
   } catch { /* fall through and let the save attempt report the failure */ }
 
   const diskError = await checkDiskSpace()
   if (diskError) {
-    mainWindow?.webContents.send('clip-save-state', { saving: false, error: diskError })
+    showSaveError('clip', diskError)
     return { error: diskError }
   }
 
@@ -934,17 +1175,41 @@ async function runSaveClip(seconds?: number): Promise<{ path?: string; duration?
     // Call with no argument at all for a full-buffer save. Passing undefined is
     // not the same thing to N-API: the argument still counts, and the engine
     // rejects it as a non-numeric clip length.
-    const clip = typeof seconds === 'number' && seconds > 0
-      ? await captureAddon.saveClip(seconds)
-      : await captureAddon.saveClip()
-    onClipSaved(clip, clip.game)
+    const saveTimeMs = Date.now()
+    const savedMarksMs = [...markTimesMs]
+    const nativeSave = trackOutputJob(typeof seconds === 'number' && seconds > 0
+      ? captureAddon.saveClip(seconds)
+      : captureAddon.saveClip())
+    nativeSaveInFlight = nativeSave
+    void nativeSave.then(
+      () => { if (nativeSaveInFlight === nativeSave) nativeSaveInFlight = null },
+      () => { if (nativeSaveInFlight === nativeSave) nativeSaveInFlight = null },
+    )
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeout = new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => {
+        // A writer that finishes late still left a clip on disk: give it its
+        // sidecar, marks and library refresh.
+        nativeSave.then(late => {
+          const metadataError = onClipSaved(late, late.game, saveTimeMs, savedMarksMs)
+          if (metadataError) showSaveError('clip', metadataError, true)
+        })
+          .catch(error => console.warn('Late clip save did not complete', error))
+        reject(new Error('Clip save timed out. The writer may still finish; try again after it does.'))
+      }, CLIP_SAVE_TIMEOUT_MS)
+    })
+    let clip: { path: string; duration: number; game: string }
+    try { clip = await Promise.race([nativeSave, timeout]) }
+    finally { if (timer !== undefined) clearTimeout(timer) }
+    const metadataError = onClipSaved(clip, clip.game, saveTimeMs, savedMarksMs)
     mainWindow?.webContents.send('clip-save-state', { saving: false })
+    if (metadataError) showSaveError('clip', metadataError, true)
     updateOverlay(false)
     return { path: clip.path, duration: clip.duration }
   } catch (error: any) {
-    const message = error?.message || 'Failed to save clip'
+    const message = saveError(error, 'Failed to save clip')
     console.error('Failed to save clip', error)
-    mainWindow?.webContents.send('clip-save-state', { saving: false, error: message })
+    showSaveError('clip', message)
     updateOverlay(false)
     return { error: message }
   }
@@ -965,7 +1230,8 @@ function saveScreenshotNow(): Promise<void> {
 async function runSaveScreenshot(): Promise<void> {
   let screenshotPath = ''
   try {
-    if (!captureAddon) throw new Error('Capture engine not available')
+    const addon = captureAddon
+    if (!addon) throw new Error('Capture engine not available')
 
     const game = currentGame ?? 'Unknown'
     const folder = join(activeClipsFolder(), gameFolderName(game))
@@ -973,11 +1239,12 @@ async function runSaveScreenshot(): Promise<void> {
     const filename = firstFreeName(clipTimestamp(new Date()), '.png', readdirSync(folder))
     screenshotPath = join(folder, filename)
 
-    await captureAddon.saveScreenshot(screenshotPath)
+    await publishScreenshot(screenshotPath, temporary => trackOutputJob(addon.saveScreenshot(temporary)))
     try { writeSidecar(screenshotPath, { duration: 0, game }) }
-    catch (error) { console.warn('Screenshot saved without metadata', error) }
+    catch (error) { showSaveError('screenshot', `Screenshot saved, but its metadata could not be saved: ${saveError(error)}`, true) }
     playClipSound()
     mainWindow?.webContents.send('clip-saved-refresh')
+    if (typeof pruneStorage === 'function') pruneStorage(screenshotPath)
     // Clipboard failure must not hide a successfully published screenshot.
     try {
       await clipboard.write([new ClipboardItem({ 'image/png': new Blob([readFileSync(screenshotPath)], { type: 'image/png' }) })])
@@ -986,24 +1253,25 @@ async function runSaveScreenshot(): Promise<void> {
       mainWindow?.webContents.send('clip-save-state', { saving: false, error: 'Screenshot saved to library, but could not copy it to the clipboard.' })
     }
   } catch (error: any) {
-    const message = error?.message || 'Failed to save screenshot'
+    const message = saveError(error, 'Failed to save screenshot')
     console.error('Failed to save screenshot', error)
-    mainWindow?.webContents.send('clip-save-state', { saving: false, error: message })
+    showSaveError('screenshot', message)
   }
 }
 
 function handleVoiceCommand(phrase: string, _rawConfidence: number) {
+  if (!settings.voiceEnabled) return
   const recognised = phrase.trim().toLocaleLowerCase()
   const custom = settings.voicePhrase.trim().toLocaleLowerCase()
 
-  if (recognised === 'flash clip that' || (custom && recognised === custom)) {
-    mainWindow?.webContents.send('hotkey-clip')
-    void saveClipNow()
-  } else if (recognised === 'flash clip short') {
+  if (recognised === 'flash clip short') {
     mainWindow?.webContents.send('hotkey-clip')
     void saveClipNow(settings.shortClipSeconds)
   } else if (recognised === 'flash screenshot') {
     void saveScreenshotNow()
+  } else if (recognised === 'flash clip that' || (custom && recognised === custom)) {
+    mainWindow?.webContents.send('hotkey-clip')
+    void saveClipNow()
   }
 }
 
@@ -1030,14 +1298,11 @@ function loadGameDb() {
 // The PID matters as much as the name: the capture engine can only split game
 // audio from everything else by targeting the game's process tree, and without
 // a PID it falls back to a single mixed track.
-// Processes that own a visible window but are never the game being played.
-const NOT_A_GAME = /^(explorer|chrome|msedge|firefox|discord|spotify|steam|epicgameslauncher|electron|flash|code|obs\d*|nvidia\w*|applicationframehost|textinputhost|searchhost|startmenuexperiencehost|shellexperiencehost|systemsettings|widgets|lockapp|taskmgr|powershell|cmd|windowsterminal|wt)\.exe$/i
-
 // Names the user has taught Flash, keyed by executable. Persisted in settings so
 // a game only has to be identified once.
 const learnedGames = (): Record<string, string> => settings.learnedGames ?? {}
 
-type DetectedGame = { name: string; pid: number; exe: string; unknown?: boolean }
+type DetectedGame = { name: string; pid: number; exe: string }
 
 // One native call, no child processes.
 //
@@ -1063,8 +1328,11 @@ function detectKnownGame(processes: ProcessEntry[], foregroundPid: number): Dete
   const matches: DetectedGame[] = []
   for (const process of processes) {
     if (linux && isLinuxInfrastructure(process.exe)) continue
-    const name = GAME_DB[process.exe.toLowerCase()] ?? learned[process.exe.toLowerCase()]
-    if (name) matches.push({ name, pid: process.pid, exe: process.exe })
+    const exe = process.exe.toLowerCase()
+    // javaw.exe runs any Java app, so only a versioned Minecraft window counts.
+    const minecraft = exe === 'javaw.exe' && /^Minecraft(?!.*Launcher).*\b(\d+\.\d+|\d\dw\d\d[a-z])/i.test(process.windowTitle)
+    const name = learned[exe] ?? (minecraft ? 'Minecraft (Java)' : GAME_DB[exe])
+    if (name)matches.push({ name, pid: process.pid, exe: process.exe })
   }
   if (!matches.length) return null
   if (matches.length === 1) return matches[0]
@@ -1081,24 +1349,6 @@ function detectKnownGame(processes: ProcessEntry[], foregroundPid: number): Dete
     ?? [...matches].sort((a, b) => (startedAt.get(b.pid) ?? 0) - (startedAt.get(a.pid) ?? 0))[0]
 }
 
-// Tier 3: nothing recognised, so guess. A window title alone is a poor signal —
-// dwm.exe and svchost.exe have one too — so this wants a real top-level window,
-// a binary outside Windows, and the largest resident set among what is left,
-// because games dwarf everything else running.
-function detectUnknownGame(processes: ProcessEntry[]): DetectedGame | null {
-  const best = processes
-    .filter(process => process.windowTitle && process.path)
-    .filter(process => !/^[a-z]:\\windows\\/i.test(process.path))
-    .filter(process => !NOT_A_GAME.test(process.exe))
-    .filter(process => !ignoredExecutables.has(process.exe.toLowerCase()))
-    .filter(process => process.workingSet > 200 * 1024 * 1024)
-    .sort((a, b) => b.workingSet - a.workingSet)[0]
-
-  return best
-    ? { name: best.windowTitle.trim() || best.exe.replace(/\.exe$/i, ''), pid: best.pid, exe: best.exe, unknown: true }
-    : null
-}
-
 function detectCurrentGame(): DetectedGame | null {
   const current = snapshot()
   if (!current) return null
@@ -1109,7 +1359,7 @@ function detectCurrentGame(): DetectedGame | null {
       .sort((a, b) => b.workingSet - a.workingSet)[0]
     return game ? { name: `Steam ${game.steamAppId}`, pid: game.pid, exe: game.exe } : null
   }
-  return detectUnknownGame(current.processes)
+  return null
 }
 
 function startGameDetection() {
@@ -1151,33 +1401,29 @@ function stopGameDetection() {
 // ── Notification Popup ────────────────────────────────────────────────────────
 
 let sessionDisplayId: number | null = null
+let captureDisplayName = ''
 const activeDisplayId = () => sessionDisplayId ?? settings.displayId
 
-function availableDisplay(requested: number): number {
+function availableDisplay(requested: number, name = ''): number {
   try {
     const displays = captureAddon?.listDisplays?.() ?? []
-    return displays.find(display => display.id === requested)?.id ?? displays.find(display => display.isPrimary)?.id ?? displays[0]?.id ?? 0
+    return selectCaptureDisplay(displays, requested, name)?.id ?? 0
   } catch { return 0 }
 }
 
 function recoverDisplay() {
-  const current = activeDisplayId()
-  const next = availableDisplay(current)
-  if (next === current) return
-  try {
-    captureAddon?.setDisplay?.(next)
-    sessionDisplayId = next
-  } catch (error) { console.warn('Could not recover capture display', error) }
-}
-
-function restoreSavedDisplay() {
-  if (sessionDisplayId === null || sessionDisplayId === settings.displayId) return
   try {
     const displays = captureAddon?.listDisplays?.() ?? []
-    if (!displays.some(display => display.id === settings.displayId)) return
-    captureAddon?.setDisplay?.(settings.displayId)
-    sessionDisplayId = null
-  } catch (error) { console.warn('Could not restore capture display', error) }
+    const selected = selectCaptureDisplay(displays, settings.displayId, settings.displayName)
+    if (!selected || (selected.id === activeDisplayId() && selected.name === captureDisplayName)) return
+    captureAddon?.setDisplay?.(selected.id)
+    captureDisplayName = selected.name
+    sessionDisplayId = selected.id
+    if (selected.name === settings.displayName && selected.id !== settings.displayId) {
+      settings.displayId = selected.id
+      saveSettings()
+    }
+  } catch (error) { console.warn('Could not recover capture display', error) }
 }
 
 function captureDisplay() {
@@ -1228,6 +1474,12 @@ function showClipNotification(durationSeconds: number) {
 function playClipSound() {
   if (!settings.notifications) return
   const soundPath = resource('assets/sounds/clip-saved.wav', 'assets/sounds/clip-saved.wav')
+  mainWindow?.webContents.send('play-clip-sound', soundPath)
+}
+
+function playMarkSound() {
+  if (!settings.notifications) return
+  const soundPath = resource('assets/sounds/mark-tick.wav', 'assets/sounds/mark-tick.wav')
   mainWindow?.webContents.send('play-clip-sound', soundPath)
 }
 
@@ -1289,14 +1541,14 @@ function createTray() {
   // Placeholder image only — applyThemeIcons() swaps in the themed one.
   tray = new Tray(nativeImage.createFromPath(resource('assets/icon.png', 'assets/icon.png')))
   updateTrayMenu()
-  tray.setToolTip('Flash — Game Clipper')
-  tray.on('double-click', () => { mainWindow?.show(); mainWindow?.focus() })
+  tray.on('double-click', showMainWindow)
 }
 
 function updateTrayMenu() {
   if (!tray) return
+  tray.setToolTip(isRecording ? 'Flash — Recording' : 'Flash — Replay buffer stopped')
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Show Flash', click: () => { mainWindow?.show(); mainWindow?.focus() } },
+    { label: 'Show Flash', click: showMainWindow },
     { label: isRecording ? 'Stop Replay Buffer' : 'Start Replay Buffer', click: () => {
       if (isRecording) {
         try {
@@ -1308,16 +1560,18 @@ function updateTrayMenu() {
         }
       } else {
         try {
-          setRecordingState(captureAddon?.startReplayBuffer() ?? false)
+          const started = captureAddon?.startReplayBuffer() ?? false
+          setRecordingState(started, started ? undefined : 'Could not start the replay buffer. Check the clips folder and drive.')
         } catch (error) {
           console.warn('Could not start the replay buffer', error)
-          setRecordingState(readRecordingState())
+          setRecordingState(readRecordingState(), `Could not start the replay buffer: ${saveError(error)}`)
         }
       }
     }},
+    { label: 'Save Replay Clip', enabled: isRecording, click: () => { void saveClipNow() } },
     { type: 'separator' },
     { label: 'Open Clips Folder', click: () => shell.openPath(activeClipsFolder()) },
-    { label: 'Settings', click: () => { mainWindow?.show(); mainWindow?.webContents.send('navigate', 'Settings') } },
+    { label: 'Settings', click: () => { showMainWindow(); mainWindow?.webContents.send('navigate', 'Settings') } },
     { type: 'separator' },
     { label: 'Quit Flash', click: () => app.quit() },
   ])
@@ -1346,6 +1600,7 @@ function createWindow() {
     },
     icon: resource('assets/icon-512.png', 'assets/icon-512.png'),
   })
+  const window = mainWindow
 
   if (process.env.NODE_ENV === 'development') {
     mainWindow.loadURL('http://localhost:5173')
@@ -1358,7 +1613,22 @@ function createWindow() {
   mainWindow.on('hide', publishVisibility)
   mainWindow.on('minimize', publishVisibility)
   mainWindow.on('restore', publishVisibility)
+  let recentRendererExits: number[] = []
+  window.webContents.on('render-process-gone', (_event, details) => {
+    if (mainWindow !== window) return
+    rendererReady = false
+    if (details.reason === 'clean-exit' || (app as any).isQuitting || window.isDestroyed()) return
+    const now = Date.now()
+    recentRendererExits = recentRendererExits.filter(time => now - time < 60_000)
+    if (recentRendererExits.length >= 2) {
+      console.error('Flash renderer exited repeatedly; automatic reload stopped', details)
+      return
+    }
+    recentRendererExits.push(now)
+    window.webContents.reload()
+  })
   mainWindow.webContents.on('did-finish-load', () => {
+    if (mainWindow !== window) return
     rendererReady = true
     publishVisibility()
     flushFlashLinks()
@@ -1370,6 +1640,7 @@ function createWindow() {
       mainWindow?.hide()
     }
   })
+  window.on('closed', () => { if (mainWindow === window) { mainWindow = null; rendererReady = false } })
 }
 
 // ── IPC Handlers ──────────────────────────────────────────────────────────────
@@ -1384,7 +1655,7 @@ function setupIPC() {
   ipcMain.handle('capture-start-replay', () => {
     if (!captureAddon) return false
     try {
-      const started = captureAddon.startReplayBuffer()
+      const started = captureAddon?.startReplayBuffer() ?? false
       setRecordingState(started)
       return started
     } catch (error) {
@@ -1395,8 +1666,13 @@ function setupIPC() {
   })
 
   ipcMain.handle('capture-stop-replay', () => {
-    try { captureAddon?.stopReplayBuffer() } catch { /* ignore */ }
-    setRecordingState(false)
+    try {
+      captureAddon?.stopReplayBuffer()
+      setRecordingState(false)
+    } catch (error) {
+      console.warn('Could not stop the replay buffer', error)
+      setRecordingState(readRecordingState())
+    }
   })
 
   ipcMain.handle('capture-save-clip', (_event, seconds?: number) => saveClipNow(seconds))
@@ -1429,7 +1705,50 @@ function setupIPC() {
   // ── Clips ──
   ipcMain.handle('get-clips', () => scanClips())
   ipcMain.handle('get-storage', () => getStorageUsage())
-  ipcMain.handle('save-shared-clip', (_event, mp4Url: unknown) => saveSharedClip(mp4Url))
+  ipcMain.handle('set-batch-share-clips', (event, paths: string[] | null, token?: string) => {
+    if (!paths) {
+      if (typeof token === 'string') releaseBatchShare(event.sender.id, token)
+      return null
+    }
+    const unique = [...new Set(paths)].filter(path => typeof path === 'string' &&
+      isInsideClips(path) && existsSync(path) && extname(path).toLowerCase() === '.mp4')
+    const nextToken = randomUUID()
+    for (const path of batchShareClips.replace(event.sender.id, nextToken, unique)) releaseClipInUse(path)
+    for (const path of unique) markClipInUse(path)
+    if (!batchShareSenders.has(event.sender.id)) {
+      batchShareSenders.add(event.sender.id)
+      event.sender.on('did-start-navigation', (_event, _url, isSameDocument, isMainFrame) => {
+        if (isMainFrame && !isSameDocument) {
+          releaseBatchShare(event.sender.id)
+          releaseEditorClip(event.sender.id)
+        }
+      })
+      event.sender.once('destroyed', () => {
+        releaseBatchShare(event.sender.id)
+        releaseEditorClip(event.sender.id)
+        batchShareSenders.delete(event.sender.id)
+      })
+      event.sender.on('render-process-gone', () => {
+        releaseBatchShare(event.sender.id)
+        releaseEditorClip(event.sender.id)
+      })
+    }
+    return nextToken
+  })
+  ipcMain.on('set-editor-clip', (event, filePath: string | null) => {
+    if (!batchShareSenders.has(event.sender.id) && !editorClipSenders.has(event.sender.id)) {
+      editorClipSenders.add(event.sender.id)
+      event.sender.on('did-start-navigation', (_event, _url, isSameDocument, isMainFrame) => {
+        if (isMainFrame && !isSameDocument) releaseEditorClip(event.sender.id)
+      })
+      event.sender.once('destroyed', () => { releaseEditorClip(event.sender.id); editorClipSenders.delete(event.sender.id) })
+      event.sender.on('render-process-gone', () => releaseEditorClip(event.sender.id))
+    }
+    if (editorClipSender !== null) releaseEditorClip(editorClipSender)
+    editorClipPath = typeof filePath === 'string' && isInsideClips(filePath) && existsSync(filePath) ? filePath : null
+    if (editorClipPath) { editorClipSender = event.sender.id; markClipInUse(editorClipPath) }
+  })
+  ipcMain.handle('save-shared-clip', (_event, mp4Url: unknown) => trackOutputJob(saveSharedClip(mp4Url)))
   ipcMain.handle('delete-clip', (_event, filePath: string) => deleteClip(filePath))
   ipcMain.handle('rename-clip', (_event, filePath: string, name: string) => renameClip(filePath, name))
   // Kept in the clip's own sidecar rather than in settings, so a starred clip
@@ -1448,26 +1767,77 @@ function setupIPC() {
       return { error: error?.message || 'Could not update this clip' }
     }
   })
+  ipcMain.handle('set-clip-tags', (_event, filePath: unknown, input: unknown) => {
+    if (typeof filePath !== 'string' || !isInsideClips(filePath) || !existsSync(filePath)) return { error: 'Clip not found' }
+    const tags = normalizeClipTags(input)
+    if (tags === null) return { error: 'Use up to 8 unique tags of 24 characters each' }
+    if (migrateSidecars(dirname(filePath)).has(filePath)) return { error: 'Could not migrate clip metadata' }
+    const sidecar = readSidecar(filePath) ?? {}
+    if (sidecar.unreadable) return { error: 'Could not read clip metadata' }
+    try {
+      writeSidecar(filePath, { ...sidecar, tags })
+      return { tags }
+    } catch (error: any) {
+      return { error: error?.message || 'Could not update this clip' }
+    }
+  })
+  ipcMain.handle('change-clip-tags-batch', (_event, filePaths: unknown, tag: unknown, action: unknown) => {
+    if (!Array.isArray(filePaths)) return { updated: [], failed: 0, error: 'Invalid clip selection' }
+    if (changeClipTag([], tag, action) === null) return { updated: [], failed: filePaths.length, error: 'Invalid tag' }
+    const updated: { filePath: string; tags: string[] }[] = []
+    let failed = 0
+    for (const filePath of filePaths) {
+      try {
+        if (typeof filePath !== 'string' || !isInsideClips(filePath) || !isManagedStorageClip(filePath) ||
+            migrateSidecars(dirname(filePath)).has(filePath)) { failed++; continue }
+        const sidecar = readSidecar(filePath) ?? {}
+        if (sidecar.unreadable) { failed++; continue }
+        const tags = changeClipTag(sidecar.tags ?? [], tag, action)
+        if (!tags) { failed++; continue }
+        writeSidecar(filePath, { ...sidecar, tags })
+        updated.push({ filePath, tags })
+      } catch {
+        failed++
+      }
+    }
+    return { updated, failed }
+  })
+  ipcMain.handle('set-clip-trim', (_event, filePath: unknown, trim: unknown, durationSec: unknown) => {
+    if (typeof filePath !== 'string' || !isInsideClips(filePath) || !existsSync(filePath)) return { error: 'Clip not found' }
+    if (migrateSidecars(dirname(filePath)).has(filePath)) return { error: 'Could not migrate clip metadata' }
+    const sidecar = readSidecar(filePath) ?? {}
+    if (sidecar.unreadable) return { error: 'Could not read clip metadata' }
+    const range = validTrimRange(trim, typeof durationSec === 'number' ? durationSec : 0)
+    if (!range) return { error: 'Invalid trim range' }
+    try {
+      writeSidecar(filePath, { ...sidecar, trim: range })
+      return { trim: range }
+    } catch (error: any) {
+      return { error: error?.message || 'Could not update this clip' }
+    }
+  })
   ipcMain.handle('move-clips', (_event, filePaths: string[], game: string) => moveClips(filePaths, game))
   // Library thumbnails. Each tile used to be a live <video> that was unloaded
   // whenever it scrolled away, so scrolling back showed black tiles reloading.
   // A small JPEG is now made once per clip version and kept in userData, keyed
   // by path, size and mtime so a trimmed or replaced file gets a fresh one.
-  const thumbnailFile = (filePath: string): string | null => {
+  const thumbnailFile = (filePath: string, markSec?: number | null): string | null => {
     if (!isInsideClips(filePath) || !existsSync(filePath)) return null
+    if (markSec != null && (!Number.isFinite(markSec) || markSec < 0)) return null
     const info = statSync(filePath)
-    const key = createHash('sha1').update(`${filePath.toLowerCase()}|${info.size}|${info.mtimeMs}`).digest('hex')
+    const cachePath = process.platform === 'win32' || process.platform === 'darwin' ? filePath.toLowerCase() : filePath
+    const key = createHash('sha1').update(`${cachePath}|${info.size}|${info.mtimeMs}${markSec == null ? '' : `|mark:${markSec}`}`).digest('hex')
     return join(app.getPath('userData'), 'thumbnails', `${key}.jpg`)
   }
-  ipcMain.handle('thumbnail-read', (_event, filePath: string) => {
+  ipcMain.handle('thumbnail-read', (_event, filePath: string, markSec?: number | null) => {
     try {
-      const file = thumbnailFile(filePath)
+      const file = thumbnailFile(filePath, markSec)
       return file && existsSync(file) ? new Uint8Array(readFileSync(file)) : null
     } catch { return null }
   })
-  ipcMain.handle('thumbnail-write', (_event, filePath: string, bytes: Uint8Array) => {
+  ipcMain.handle('thumbnail-write', (_event, filePath: string, bytes: Uint8Array, markSec?: number | null) => {
     try {
-      const file = thumbnailFile(filePath)
+      const file = thumbnailFile(filePath, markSec)
       // A 480px JPEG is ~20-40 KB; anything far larger is not a thumbnail.
       if (!file || !(bytes instanceof Uint8Array) || bytes.length === 0 || bytes.length > 1024 * 1024) return false
       mkdirSync(dirname(file), { recursive: true })
@@ -1476,7 +1846,7 @@ function setupIPC() {
     } catch { return false }
   })
 
-  ipcMain.handle('save-clip-frame', (_event, filePath: string, playheadSeconds: number, bytes: Uint8Array) => {
+  ipcMain.handle('save-clip-frame', async (_event, filePath: string, playheadSeconds: number, bytes: Uint8Array) => {
     if (!isInsideClips(filePath) || !existsSync(filePath)) return { error: 'Clip not found' }
     if (extname(filePath).toLowerCase() !== '.mp4') return { error: 'Frames can only be grabbed from clips' }
     if (!Number.isFinite(playheadSeconds) || playheadSeconds < 0) return { error: 'Invalid playhead position' }
@@ -1497,13 +1867,14 @@ function setupIPC() {
       const reservation = reserveOutput(join(folder, `${stem}.png`))
       const output = reservation.path
       try {
-        writeFileSync(output, bytes, { flag: 'wx' })
-        writeSidecar(output, { duration: 0, game: readSidecar(filePath)?.game ?? basename(folder) })
+        await publishScreenshot(output, temporary => writeFileSync(temporary, bytes, { flag: 'wx' }))
+        try { writeSidecar(output, { duration: 0, game: readSidecar(filePath)?.game ?? basename(folder) }) }
+        catch (error) { showSaveError('screenshot', `Screenshot saved, but its metadata could not be saved: ${saveError(error)}`, true) }
       } finally { reservation.release() }
       mainWindow?.webContents.send('clip-saved-refresh')
       return { path: output }
     } catch (error: any) {
-      return { error: error?.message || 'Could not save screenshot' }
+      return { error: saveError(error, 'Could not save screenshot') }
     }
   })
   // openPath hands the file to whatever Windows has associated with it, which
@@ -1523,22 +1894,23 @@ function setupIPC() {
     if (!isInsideClips(filePath) || !existsSync(filePath)) return { error: 'Clip not found' }
     if (!(end > start)) return { error: 'End must be after start' }
     if (extname(filePath).toLowerCase() !== '.mp4') return { error: 'Only clips can be processed' }
+    const spaceError = await checkDerivedOutputSpace(filePath)
+    if (spaceError) return { error: spaceError }
     let reservation: ReturnType<typeof reserveOutput> | undefined
     const requested = filePath.replace(/\.mp4$/i, ' - trim.mp4')
+    markClipInUse(filePath)
     try {
       reservation = reserveOutput(requested)
       const output = reservation.path
-      const result = await captureAddon.trimClip(filePath, output, start, end)
+      const result = await trackOutputJob(captureAddon.trimClip(filePath, output, start, end))
       try {
-        writeSidecar(result.path, {
-          duration: Math.round(result.duration), game: readSidecar(filePath)?.game ?? basename(dirname(filePath)),
-        })
-      } catch { /* sidecar is an optimisation */ }
+        writeDerivedClipSidecar(filePath, result.path, result.duration, result.actualStartSeconds ?? start)
+      } catch (error) { showSaveError('clip', `Trim saved, but its metadata could not be saved: ${saveError(error)}`, true) }
       mainWindow?.webContents.send('clip-saved-refresh')
       return { path: result.path, duration: result.duration, actualStartSeconds: result.actualStartSeconds }
     } catch (error: any) {
-      return { error: error?.message || 'Trim failed' }
-    } finally { reservation?.release() }
+      return { error: saveError(error, 'Trim failed') }
+    } finally { reservation?.release(); releaseClipInUse(filePath) }
   })
 
   // The editor's Save. Which native path it takes depends entirely on what was
@@ -1556,8 +1928,11 @@ function setupIPC() {
     if (!(options.endSeconds > options.startSeconds)) return { error: 'End must be after start' }
 
     if (extname(filePath).toLowerCase() !== '.mp4') return { error: 'Only clips can be processed' }
+    const spaceError = await checkDerivedOutputSpace(filePath)
+    if (spaceError) return { error: spaceError }
     let reservation: ReturnType<typeof reserveOutput> | undefined
     const requested = filePath.replace(/\.mp4$/i, ' - edit.mp4')
+    markClipInUse(filePath)
     try {
       reservation = reserveOutput(requested)
       const output = reservation.path
@@ -1566,7 +1941,7 @@ function setupIPC() {
         if (!captureAddon?.exportClip) return { error: 'This build cannot re-encode clips' }
         // A ceiling high enough that the size budget never downscales. This is
         // a full-quality edit, not a share copy.
-        result = await captureAddon.exportClip(filePath, output, {
+        result = await trackOutputJob(captureAddon.exportClip(filePath, output, {
           maxBytes: Number.MAX_SAFE_INTEGER,
           startSeconds: options.startSeconds,
           endSeconds: options.endSeconds,
@@ -1574,21 +1949,20 @@ function setupIPC() {
           saturation: options.saturation,
           // A saved edit is opened again by the trimmer, which only reads H.264.
           codec: 'h264',
-        })
+        }))
       } else {
         if (!captureAddon?.trimClip) return { error: 'This build cannot trim clips' }
-        result = await captureAddon.trimClip(filePath, output, options.startSeconds, options.endSeconds)
+        result = await trackOutputJob(captureAddon.trimClip(filePath, output, options.startSeconds, options.endSeconds))
       }
       try {
-        writeSidecar(result.path, {
-          duration: Math.round(result.duration), game: readSidecar(filePath)?.game ?? basename(dirname(filePath)),
-        })
-      } catch { /* sidecar is an optimisation */ }
+        writeDerivedClipSidecar(filePath, result.path, result.duration,
+          options.reEncode ? options.startSeconds : result.actualStartSeconds ?? options.startSeconds)
+      } catch (error) { showSaveError('clip', `Edit saved, but its metadata could not be saved: ${saveError(error)}`, true) }
       mainWindow?.webContents.send('clip-saved-refresh')
       return { path: result.path, duration: result.duration, actualStartSeconds: result.actualStartSeconds }
     } catch (error: any) {
-      return { error: error?.message || 'Save failed' }
-    } finally { reservation?.release() }
+      return { error: saveError(error, 'Save failed') }
+    } finally { reservation?.release(); releaseClipInUse(filePath) }
   })
 
   // Read-only, but both walk or decode the whole file, so the addon runs them
@@ -1621,24 +1995,25 @@ function setupIPC() {
     if (!Number.isFinite(maxBytes) || maxBytes <= 0) return { error: 'Export size is not valid' }
     const codec: ExportCodecChoice = requested === 'h264' ? 'h264' : 'auto'
     if (extname(filePath).toLowerCase() !== '.mp4') return { error: 'Only clips can be processed' }
+    const spaceError = await checkDerivedOutputSpace(filePath, maxBytes)
+    if (spaceError) return { error: spaceError }
     let reservation: ReturnType<typeof reserveOutput> | undefined
     const requestedPath = filePath.replace(/\.mp4$/i, exportSuffix(maxBytes, codec))
+    markClipInUse(filePath)
     try {
       reservation = reserveOutput(requestedPath)
       const output = reservation.path
       // 60 fps is the most a chat-window player shows; anything above it is
       // bitrate spent on frames nobody sees.
-      const result = await captureAddon.exportClip(filePath, output, { maxBytes, codec, maxFps: 60 })
+      const result = await trackOutputJob(captureAddon.exportClip(filePath, output, { maxBytes, codec, maxFps: 60 }))
       try {
-        writeSidecar(result.path, {
-          duration: Math.round(result.duration), game: readSidecar(filePath)?.game ?? basename(dirname(filePath)),
-        })
-      } catch { /* sidecar is an optimisation */ }
+        writeDerivedClipSidecar(filePath, result.path, result.duration, 0)
+      } catch (error) { showSaveError('clip', `Export saved, but its metadata could not be saved: ${saveError(error)}`, true) }
       mainWindow?.webContents.send('clip-saved-refresh')
       return result
-    } catch (error: any) {
-      return { error: error?.message || 'Export failed' }
-    } finally { reservation?.release() }
+    } catch (error) {
+      return { error: saveError(error, 'Export failed') || 'Export failed' }
+    } finally { reservation?.release(); releaseClipInUse(filePath) }
   })
 
   ipcMain.handle('open-clips-folder', async () => {
@@ -1695,31 +2070,55 @@ function setupIPC() {
     // Everything below keys off `changed`, not the raw request: a value the
     // sanitiser dropped must not trigger the side effect that applies it.
     const { clipsFolder: _ignored, ...changed } = sanitiseSettings(partial, settings)
+    const previousSettings = { ...settings }
     const previousDisplay = settings.displayId
-    if (changed.displayId !== undefined) changed.displayId = availableDisplay(changed.displayId)
+    if (changed.displayId === undefined) delete changed.displayName
+    if (changed.displayId !== undefined) {
+      changed.displayId = availableDisplay(changed.displayId)
+      try { changed.displayName = captureAddon?.listDisplays?.()?.find(display => display.id === changed.displayId)?.name ?? '' }
+      catch { changed.displayName = '' }
+    }
     Object.assign(settings, changed)
     // A short clip longer than the buffer it is cut from cannot exist: the save
     // returns the whole buffer and the UI goes on claiming the longer number.
     // Enforced here rather than only in the slider, because the buffer can be
     // shortened after the short-clip length was set.
     settings.shortClipSeconds = Math.min(settings.shortClipSeconds, settings.bufferLength)
-    saveSettings()
+    if (!saveSettings()) {
+      settings = previousSettings
+      throw new Error('Could not save settings')
+    }
     if (changed.bufferLength !== undefined || changed.quality !== undefined || changed.perGame !== undefined) {
       applyCaptureSettings()
     }
-    if (changed.audioCapture !== undefined) applyAudioCapture()
+    if (changed.audioCapture !== undefined || changed.audioTracks !== undefined) applyAudioCapture()
     if (changed.audioLanes !== undefined) applyAudioLanes()
     if (changed.micDeviceId !== undefined) applyMicDevice()
     if (changed.autoDeleteDays !== undefined) pruneOldClips()
+    if (changed.maxStorageGB !== undefined) pruneStorage()
     if (changed.theme !== undefined) { applyThemeIcons(); destroyOverlay(); updateOverlay() }
     if (changed.overlay !== undefined || changed.overlayPosition !== undefined) updateOverlay()
-    if (changed.hotkey !== undefined || changed.hotkeyShort !== undefined || changed.screenshotHotkey !== undefined) registerHotkeys()
+    if (changed.hotkey !== undefined || changed.hotkeyShort !== undefined || changed.screenshotHotkey !== undefined || changed.markHotkey !== undefined) registerHotkeys()
     if (changed.voicePhrase !== undefined) applyVoicePhrases()
     if (changed.voiceRawFloor !== undefined || changed.voiceCooldownMs !== undefined) applyVoiceThreshold()
     if (changed.voiceEnabled !== undefined) applyVoiceEnabled()
     if (changed.displayId !== undefined) {
-      try { captureAddon?.setDisplay?.(changed.displayId); sessionDisplayId = null }
-      catch (error) { settings.displayId = previousDisplay; saveSettings(); console.warn('Could not switch display', error) }
+      try { captureAddon?.setDisplay?.(changed.displayId); sessionDisplayId = null; captureDisplayName = settings.displayName }
+      catch (error) {
+        // The native switch can succeed and then throw when restarting capture.
+        // Keep the selected display in sync with the engine in that case.
+        let actualDisplay: number | undefined
+        try { actualDisplay = captureAddon?.getStatus().displayId } catch { /* keep the previous selection */ }
+        if (actualDisplay !== changed.displayId) {
+          settings.displayId = previousDisplay
+          settings.displayName = previousSettings.displayName
+          saveSettings()
+        } else {
+          sessionDisplayId = null
+          captureDisplayName = settings.displayName
+        }
+        console.warn('Could not switch display', error)
+      }
       checkCaptureHealth()
       updateOverlay()
     }
@@ -1734,7 +2133,13 @@ function setupIPC() {
   // What the Settings picker shows: apps that have an audio session right now,
   // and which lane each is recorded to.
   ipcMain.handle('list-audio-apps', () => {
-    const supported = captureAddon?.capabilities?.perAppAudio === true
+    let supported = false
+    try {
+      // 'unavailable' means no audio source is running yet, so fall back to the platform capability.
+      const mode = captureAddon?.getStatus?.().audioMode
+      supported = mode && mode !== 'unavailable' ? mode === 'separate' : captureAddon?.capabilities?.perAppAudio === true
+    }
+    catch (error) { console.warn('Could not read audio mode', error) }
     if (!supported) return { supported: false, apps: [] }
     try {
       const apps = captureAddon?.listAudioApps?.() ?? []
@@ -1762,13 +2167,24 @@ function setupIPC() {
       properties: ['openDirectory'],
     })
     if (result.canceled || !result.filePaths[0]) return null
+    const previousFolder = settings.clipsFolder
     settings.clipsFolder = result.filePaths[0]
-    saveSettings()
+    if (!saveSettings()) {
+      settings.clipsFolder = previousFolder
+      throw new Error('Could not save clips folder')
+    }
     ensureClipsFolder()
     // Without this the engine keeps writing MP4s to the old folder while the
     // library reads the new one: clips save fine and never appear.
     try { captureAddon?.setClipsDir?.(activeClipsFolder()) }
-    catch (error) { console.warn('Could not update engine clips folder', error) }
+    catch (error) {
+      settings.clipsFolder = previousFolder
+      saveSettings()
+      ensureClipsFolder()
+      try { captureAddon?.setClipsDir?.(activeClipsFolder()) }
+      catch (restoreError) { console.warn('Could not restore engine clips folder', restoreError) }
+      throw error
+    }
     return activeClipsFolder()
   })
   ipcMain.handle('send-feedback', async (_event, message: unknown) => {
@@ -1797,32 +2213,73 @@ function setupIPC() {
   })
 
   // Uploads the clip to the home server and puts the resulting link on the
-  // clipboard. The link stops working after SHARE_DAYS days.
+  // clipboard. The server reports when each link expires.
   let sharing = false
   ipcMain.handle('get-update-state', () => getUpdateState())
-  ipcMain.handle('install-update', () => { (app as any).isQuitting = true; installUpdateNow() })
+  ipcMain.handle('install-update', () => {
+    if (getUpdateState().status !== 'ready') return
+    ;(app as any).isQuitting = true
+    try { installUpdateNow() }
+    catch (error) { (app as any).isQuitting = false; throw error }
+  })
   ipcMain.handle('share-clip-link',async (_event, filePath: string) => {
     if (!isInsideClips(filePath) || !existsSync(filePath)) return { ok: false, error: 'Clip not found' }
     if (extname(filePath).toLowerCase() !== '.mp4') return { ok: false, error: 'Only clips can be shared' }
     if (sharing) return { ok: false, error: 'A link is already being made' }
     sharing = true
+    markClipInUse(filePath)
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 5 * 60_000)
     let temporaryPath: string | null = null
     try {
-      const originalBytes = statSync(filePath).size
+      const sourceStat = statSync(filePath)
+      const originalBytes = sourceStat.size
+      // Bump this when export options or mixing inputs change. The version also
+      // prevents reusing bytes prepared by a different app build.
+      const preparationKey = JSON.stringify({ version: 1, appVersion: app.getVersion(),
+        codec: 'h264', maxFps: 60, gains: null })
+      const cachedShare = readSidecar(filePath)?.cachedShare
+      const existing = reusableShareUrl(cachedShare, {
+        path: filePath, size: sourceStat.size, mtimeMs: sourceStat.mtimeMs, preparationKey,
+      }, Date.now())
+      if (existing) {
+        try {
+          const head = await net.fetch(cachedShareMp4Url(existing), {
+            method: 'HEAD', signal: AbortSignal.timeout(10_000),
+          })
+          if (head.ok) {
+            clipboard.writeText(existing)
+            return { ok: true, url: existing,
+              days: Math.ceil((Date.parse(cachedShare!.expiresAt) - Date.now()) / 86_400_000) }
+          }
+        } catch { /* A missing or unreachable link is uploaded again. */ }
+      }
       let uploadPath = filePath
       const addon = captureAddon
-      if (addon?.getClipKeyframes && addon.exportClip) {
+      let audioTrackCount: number
+      try { audioTrackCount = await countMp4AudioTracks(filePath) }
+      catch { return { ok: false, error: 'Could not read the clip audio tracks for sharing.' } }
+      let durationSeconds = 0
+      if (addon?.getClipKeyframes) {
         try {
-          const { durationSeconds } = await addon.getClipKeyframes(filePath)
-          const maxBytes = shareCopyMaxBytes({ durationSeconds, fileBytes: originalBytes })
-          if (maxBytes !== null) {
-            temporaryPath = join(tmpdir(), `flash-share-${process.pid}-${randomUUID()}.mp4`)
-            await addon.exportClip(filePath, temporaryPath, { maxBytes, codec: 'h264', maxFps: 60 })
-            if (statSync(temporaryPath).size <= originalBytes) uploadPath = temporaryPath
-          }
-        } catch { /* Sharing the original is the safe fallback. */ }
+          durationSeconds = (await addon.getClipKeyframes(filePath)).durationSeconds
+        } catch { /* A single-track clip can still be shared unchanged. */ }
+      }
+      const maxBytes = shareExportMaxBytes({ durationSeconds, fileBytes: originalBytes, audioTrackCount })
+      const preparation = decideSharePreparation(audioTrackCount, maxBytes, !!addon?.exportClip)
+      if (preparation === 'error') {
+        return { ok: false, error: 'Could not mix the clip audio for sharing.' }
+      }
+      if (preparation === 'export' && addon?.exportClip && maxBytes !== null) {
+        try {
+          temporaryPath = join(tmpdir(), `flash-share-${process.pid}-${randomUUID()}.mp4`)
+          await trackOutputJob(addon.exportClip(filePath, temporaryPath, { maxBytes, codec: 'h264',
+            ...(audioTrackCount > 1 && maxBytes === SHARE_MAX_BYTES ? {} : { maxFps: 60 }) }))
+          uploadPath = temporaryPath
+        } catch {
+          if (audioTrackCount > 1) return { ok: false, error: 'Could not mix the clip audio for sharing.' }
+          // Preserve the original for a one-track clip when optional compression fails.
+        }
       }
       const sizeError = checkShareSize(statSync(uploadPath).size)
       if (sizeError) return { ok: false, error: sizeError }
@@ -1836,10 +2293,31 @@ function setupIPC() {
       if (response.status === 507) return { ok: false, error: 'The share server is full right now.' }
       if (response.status === 413) return { ok: false, error: 'The server refused this clip as too big.' }
       if (response.status !== 201) return { ok: false, error: 'Could not reach the share server.' }
-      const url = shareUrlFromPath(((await response.json()) as { path?: unknown })?.path)
+      const answer = (await response.json()) as { path?: unknown; expiresAt?: unknown }
+      const url = shareUrlFromPath(answer?.path)
       if (!url) return { ok: false, error: 'The share server sent an unexpected answer.' }
+      // Without a usable expiry the upload still counts; the link is just not cached.
+      const expiresAt = typeof answer.expiresAt === 'string' && Date.parse(answer.expiresAt) > Date.now()
+        ? answer.expiresAt : null
+      // The source may have been edited while its copy was being uploaded.
+      let currentStat: ReturnType<typeof statSync> | null = null
+      if (expiresAt) {
+        try { currentStat = statSync(filePath) } catch { /* The upload already succeeded. */ }
+      }
+      if (expiresAt && currentStat?.size === sourceStat.size && currentStat.mtimeMs === sourceStat.mtimeMs) {
+        const sidecar = readSidecar(filePath)
+        if (!sidecar?.unreadable) {
+          try {
+            writeSidecar(filePath, { ...sidecar, cachedShare: {
+              url, expiresAt, sourcePath: filePath,
+              sourceSize: sourceStat.size, sourceMtimeMs: sourceStat.mtimeMs, preparationKey,
+            } })
+          } catch { /* A sidecar write failure must not hide a successful upload. */ }
+        }
+      }
       clipboard.writeText(url)
-      return { ok: true, url, days: SHARE_DAYS }
+      return { ok: true, url, days: expiresAt
+        ? Math.ceil((Date.parse(expiresAt) - Date.now()) / 86_400_000) : SHARE_DAYS }
     } catch {
       return { ok: false, error: 'Could not reach the share server.' }
     } finally {
@@ -1848,6 +2326,7 @@ function setupIPC() {
         try { unlinkSync(temporaryPath) } catch { /* The export may have failed before creating it. */ }
       }
       sharing = false
+      releaseClipInUse(filePath)
     }
   })
 
@@ -1863,10 +2342,11 @@ function setupIPC() {
       }
     } else {
       try {
-        setRecordingState(captureAddon?.startReplayBuffer() ?? false)
+        const started = captureAddon?.startReplayBuffer() ?? false
+        setRecordingState(started, started ? undefined : 'Could not start the replay buffer. Check the clips folder and drive.')
       } catch (error) {
         console.warn('Could not start the replay buffer', error)
-        setRecordingState(readRecordingState())
+        setRecordingState(readRecordingState(), `Could not start the replay buffer: ${saveError(error)}`)
       }
     }
   })
@@ -1899,6 +2379,16 @@ let lastRestart = 0
 // trying to bring capture back without ever overriding a deliberate stop.
 let autoStopped = false
 let lastAutoRetry = 0
+let lastCaptureNotice = -Infinity
+
+function notifyCaptureInterruption(message: string) {
+  const now = Date.now()
+  const notice = captureInterruptionNotice(isRecording, message, lastCaptureNotice, now)
+  if (!notice || mainWindow?.isFocused()) return
+  lastCaptureNotice = now
+  try { new Notification({ title: 'Flash capture interrupted', body: notice }).show() }
+  catch (error) { console.warn('Could not show capture interruption notification', error) }
+}
 
 function startCaptureWatchdog() {
   watchdogTimer = setInterval(checkCaptureHealth, 5000)
@@ -1914,8 +2404,9 @@ function checkCaptureHealth() {
     if (process.platform === 'linux' || Date.now() - lastAutoRetry < 10_000) return
     lastAutoRetry = Date.now()
     try {
-      captureAddon.stopReplayBuffer()
-      if (captureAddon.startReplayBuffer()) {
+      recoverDisplay()
+      captureAddon?.stopReplayBuffer()
+      if (captureAddon?.startReplayBuffer() ?? false) {
         console.log('Capture watchdog: recovered after stop')
         restartAttempts = 0
         setRecordingState(true)
@@ -1926,7 +2417,22 @@ function checkCaptureHealth() {
     return
   }
   let status: ReturnType<CaptureAddon['getStatus']>
-  try { status = captureAddon.getStatus() } catch { return }
+  try { status = captureAddon.getStatus() }
+  catch (error) {
+    const message = process.platform === 'linux'
+      ? 'Capture stopped: could not read the capture engine status. Press the REC badge to retry.'
+      : 'Capture stopped: could not read the capture engine status. Retrying automatically.'
+    notifyCaptureInterruption(message)
+    // Linux waits for the REC badge, so release the engine now. Windows stops it
+    // itself before each slow retry.
+    if (process.platform === 'linux') {
+      try { captureAddon.stopReplayBuffer() }
+      catch (stopError) { console.warn('Capture watchdog: could not stop replay buffer', stopError) }
+    }
+    setRecordingState(false, message, process.platform !== 'linux')
+    console.warn('Capture watchdog: could not read status', error)
+    return
+  }
   if (status.capturePending) return
 
   // captureHealthy is the engine's own view; recording is the thread state.
@@ -1936,10 +2442,13 @@ function checkCaptureHealth() {
 
   const reason = status.captureError || 'capture stopped unexpectedly'
   console.warn('Capture watchdog:', reason)
+  notifyCaptureInterruption(process.platform === 'linux'
+    ? `Capture stopped: ${reason}. Press the REC badge to retry.`
+    : `Capture was interrupted: ${reason}. Flash is restarting the replay buffer.`)
   // A portal denial is a user decision. Retrying automatically would reopen
   // the permission dialog repeatedly; the REC action is the explicit retry.
   if (process.platform === 'linux') {
-    try { captureAddon.stopReplayBuffer() }
+    try { captureAddon?.stopReplayBuffer() }
     catch (error) { console.warn('Capture watchdog: could not stop replay buffer', error) }
     setRecordingState(false, `Capture stopped: ${reason}. Press the REC badge to retry.`)
     return
@@ -1956,8 +2465,9 @@ function checkCaptureHealth() {
   lastRestart = now
 
   try {
-    captureAddon.stopReplayBuffer()
-    const restarted = captureAddon.startReplayBuffer()
+    recoverDisplay()
+    captureAddon?.stopReplayBuffer()
+    const restarted = captureAddon?.startReplayBuffer() ?? false
     if (restarted) {
       console.log('Capture watchdog: replay buffer restarted')
       setRecordingState(true)
@@ -1972,7 +2482,9 @@ function checkCaptureHealth() {
 // One place that fixes the flag, the tray, the overlay and the renderer together,
 // so they cannot disagree about whether Flash is recording.
 function setRecordingState(recording: boolean, error?: string, byWatchdog = false) {
+  if (!recording && error) notifyCaptureInterruption(error)
   isRecording = recording
+  if (!recording) { markTimesMs = []; lastMarkPressMs = -Infinity }
   autoStopped = byWatchdog && !recording
   updateTrayMenu()
   updateOverlay()
@@ -1991,7 +2503,10 @@ function readRecordingState(): boolean {
 // three are tracked: a screenshot key silently lost to another app used to be
 // invisible, because Settings drew the other two rows as registered no matter
 // what happened.
-const hotkeyStatus = { clip: false, short: false, screenshot: false }
+const hotkeyStatus = { clip: false, short: false, screenshot: false, mark: false }
+const acceptScreenshotHotkey = repeatGate(1000)
+let markTimesMs: number[] = []
+let lastMarkPressMs = -Infinity
 let hotkeyRegistered = false
 
 // register() throws on a malformed accelerator and returns false on a taken one.
@@ -2024,12 +2539,25 @@ function registerHotkeys(): boolean {
   hotkeyStatus.screenshot =
     settings.screenshotHotkey !== settings.hotkey &&
     settings.screenshotHotkey !== settings.hotkeyShort &&
-    claim(settings.screenshotHotkey, () => { void saveScreenshotNow() })
+    claim(settings.screenshotHotkey, () => { if (acceptScreenshotHotkey(Date.now())) void saveScreenshotNow() })
+
+  hotkeyStatus.mark = Boolean(settings.markHotkey) &&
+    ![settings.hotkey, settings.hotkeyShort, settings.screenshotHotkey].includes(settings.markHotkey) &&
+    claim(settings.markHotkey, () => {
+      if (!isRecording || !readRecordingState()) return
+      const now = Date.now()
+      const bufferLength = resolveGameSettings(settings.perGame ?? {}, currentGame, settings).bufferLength
+      const result = recordClipMark(markTimesMs, now, bufferLength, lastMarkPressMs)
+      markTimesMs = result.marks
+      lastMarkPressMs = result.lastPressMs
+      if (result.recorded) playMarkSound()
+    })
 
   hotkeyRegistered = hotkeyStatus.clip
-  if (!hotkeyStatus.clip) console.warn(`Could not register clip hotkey ${settings.hotkey} — already taken`)
-  if (!hotkeyStatus.short) console.warn(`Could not register short-clip hotkey ${settings.hotkeyShort} — already taken`)
-  if (!hotkeyStatus.screenshot) console.warn(`Could not register screenshot hotkey ${settings.screenshotHotkey} — already taken`)
+  if (settings.hotkey && !hotkeyStatus.clip) console.warn(`Could not register clip hotkey ${settings.hotkey} — already taken`)
+  if (settings.hotkeyShort && !hotkeyStatus.short) console.warn(`Could not register short-clip hotkey ${settings.hotkeyShort} — already taken`)
+  if (settings.screenshotHotkey && !hotkeyStatus.screenshot) console.warn(`Could not register screenshot hotkey ${settings.screenshotHotkey} — already taken`)
+  if (settings.markHotkey && !hotkeyStatus.mark) console.warn(`Could not register mark hotkey ${settings.markHotkey} — already taken`)
   updateTrayMenu()
   return hotkeyRegistered
 }
@@ -2058,7 +2586,7 @@ function flashLinkFromArgv(argv: readonly string[]): FlashLink | null {
 
 function showMainWindow() {
   if (!app.isReady()) return
-  if (!mainWindow) createWindow()
+  if (!mainWindow || mainWindow.isDestroyed()) createWindow()
   mainWindow?.show()
   if (mainWindow?.isMinimized()) mainWindow.restore()
   mainWindow?.focus()
@@ -2066,7 +2594,7 @@ function showMainWindow() {
 
 function dispatchFlashLink(link: FlashLink) {
   showMainWindow()
-  if (!rendererReady || !mainWindow) {
+  if (!rendererReady || !mainWindow || mainWindow.isDestroyed()) {
     pendingFlashLinks.push(link)
     return
   }
@@ -2074,7 +2602,7 @@ function dispatchFlashLink(link: FlashLink) {
 }
 
 function flushFlashLinks() {
-  if (!rendererReady || !mainWindow) return
+  if (!rendererReady || !mainWindow || mainWindow.isDestroyed()) return
   for (const link of pendingFlashLinks.splice(0)) mainWindow.webContents.send('open-shared-clip', link)
 }
 
@@ -2088,7 +2616,7 @@ if (!primaryInstance) {
     const flashLink = flashLinkFromArgv(argv)
     if (flashLink) { dispatchFlashLink(flashLink); return }
     if (!app.isReady()) return
-    if (!mainWindow) createWindow()
+    if (!mainWindow || mainWindow.isDestroyed()) createWindow()
     // Windows launching a second copy at login, while Flash is already open, is
     // not a request to come to the front. Clicking the shortcut is.
     if (argv.includes(AUTOSTART_FLAG)) return
@@ -2180,7 +2708,9 @@ app.on('ready', () => {
   applyInstallerAutostartRequest()
 
   pruneOldClips()
-  pruneTimer = setInterval(pruneOldClips, 6 * 3600 * 1000)
+  prunePartialClips()
+  pruneStorage()
+  pruneTimer = setInterval(() => { pruneOldClips(); pruneStorage() }, 6 * 3600 * 1000)
 
   captureAddon = loadCaptureAddon()
   if (captureAddon) {
@@ -2193,7 +2723,17 @@ app.on('ready', () => {
       console.warn('Could not restore the portal token:', error)
       captureStatusError = error instanceof Error ? error.message : String(error)
     }
-    sessionDisplayId = availableDisplay(settings.displayId)
+    sessionDisplayId = availableDisplay(settings.displayId, settings.displayName)
+    try { captureDisplayName = captureAddon.listDisplays?.().find(display => display.id === sessionDisplayId)?.name ?? '' }
+    catch { captureDisplayName = '' }
+    if (settings.displayName && captureDisplayName === settings.displayName && sessionDisplayId !== settings.displayId) {
+      settings.displayId = sessionDisplayId
+      saveSettings()
+    }
+    if (!settings.displayName && captureDisplayName) {
+      settings.displayName = captureDisplayName
+      saveSettings()
+    }
     try {
       const status = captureAddon.initialize(activeClipsFolder(), sessionDisplayId)
       if (status.error) {
@@ -2213,7 +2753,7 @@ app.on('ready', () => {
     // to replay-buffer state. Once enabled it listens for the lifetime of Flash.
     initializeVoiceActivation()
     try {
-      setRecordingState(captureAddon.startReplayBuffer())
+      setRecordingState(captureAddon?.startReplayBuffer() ?? false)
       if (isRecording) console.log('Replay buffer started automatically')
       else {
         console.warn('Replay buffer failed to start')
@@ -2253,14 +2793,35 @@ app.on('ready', () => {
 
   // Resume and display changes are the two events that reliably invalidate DXGI
   // duplication. Nudge the watchdog immediately rather than waiting up to 5s.
-  powerMonitor.on('resume', () => { restartAttempts = 0; checkCaptureHealth(); console.log('System resumed — rechecking capture') })
-  screen.on('display-added', () => { restartAttempts = 0; restoreSavedDisplay(); recoverDisplay(); checkCaptureHealth(); updateOverlay() })
+  powerMonitor.on('resume', () => {
+    restartAttempts = 0
+    if (process.platform === 'win32' && isRecording) {
+      recoverDisplay()
+      try { captureAddon?.resetReplayAfterResume?.() }
+      catch (error) {
+        console.warn('Capture restart after resume failed', error)
+        setRecordingState(false, 'Capture stopped after resume. Retrying automatically.', true)
+      }
+    }
+    checkCaptureHealth()
+    console.log('System resumed — rechecking capture')
+  })
+  screen.on('display-added', () => { restartAttempts = 0; recoverDisplay(); checkCaptureHealth(); updateOverlay() })
   screen.on('display-metrics-changed', () => { restartAttempts = 0; recoverDisplay(); checkCaptureHealth(); updateOverlay() })
   screen.on('display-removed', () => { restartAttempts = 0; recoverDisplay(); checkCaptureHealth(); updateOverlay() })
 })
 
 app.on('window-all-closed', () => { /* live in tray */ })
-app.on('before-quit', () => { (app as any).isQuitting = true })
+app.on('before-quit', (event) => {
+  // A second Quit goes through, so a native job that never settles cannot
+  // keep the app open for good.
+  if (pendingOutputJobs.size > 0 && !quitAfterOutputJobs) {
+    quitAfterOutputJobs = true
+    event.preventDefault()
+    return
+  }
+  ;(app as any).isQuitting = true
+})
 app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   stopGameDetection()
@@ -2269,4 +2830,4 @@ app.on('will-quit', () => {
   try { captureAddon?.setVoiceEnabled?.(false) } catch { /* ignore */ }
   try { captureAddon?.stopReplayBuffer() } catch { /* ignore */ }
 })
-app.on('activate', () => { if (!mainWindow) createWindow() })
+app.on('activate', () => { if (!mainWindow || mainWindow.isDestroyed()) createWindow() })

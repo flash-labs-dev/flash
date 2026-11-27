@@ -1,18 +1,20 @@
 import { usePlaybackVisibility } from './usePlaybackVisibility'
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { lazy, Suspense, useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { DEFAULT_THEME } from '../shared/themes'
-import { DEFAULT_AUDIO_LANES } from '../shared/audioLanes'
+import { DEFAULT_AUDIO_LANES, DEFAULT_AUDIO_TRACKS } from '../shared/audioLanes'
 import { clipUrl, matchesQuery } from '../shared/editor'
+import { rangeCutoff, type ClipTimeRange } from '../shared/clipTime'
 import type { AutostartState } from '../preload/preload'
 import { clearSelection, selectRange, toggleSelection } from '../shared/selection'
 import { SelectionBar } from './SelectionBar'
-import Editor from './Editor'
 import { FeedView } from './FeedView'
+import { retainThumbnails } from './thumbnails'
+import { microphoneError } from '../shared/microphoneError'
 import { LibraryView, sortClips, type SortOrder } from './LibraryView'
-import { SettingsView, FeedbackDialog, type CaptureHealth, type Display, type Settings, type VoiceStatus } from './SettingsView'
+import type { CaptureHealth, Display, Settings, VoiceStatus } from './SettingsView'
 import { SharedClipView, type SharedClipLink } from './SharedClipView'
 import {
-  type Clip, type ConfirmRequest, ConfirmDialog, StickmanIcon, formatBytes,
+  type Clip, type ConfirmRequest, ConfirmDialog, DialogFrame, StickmanIcon, formatBytes,
 } from './ui'
 
 /* THESIS: one clip owns the window and the next is one flick away; Flash
@@ -31,17 +33,48 @@ import {
    finish review, the verdict, and DESIGN.md */
 
 type View = 'Feed' | 'Library' | 'Settings' | 'Shared'
+const Editor = lazy(() => import('./Editor'))
+const SettingsView = lazy(() => import('./SettingsView').then(module => ({ default: module.SettingsView })))
+const FeedbackDialog = lazy(() => import('./FeedbackDialog').then(module => ({ default: module.FeedbackDialog })))
 const VIEWS = ['Feed', 'Library', 'Settings'] as const
 // Shown names. "Feed" is the screen's form, but to a person it promises a
 // social feed, and Flash has no account and posts nothing.
 const VIEW_LABELS: Record<(typeof VIEWS)[number], string> = { Feed: 'Watch', Library: 'Library', Settings: 'Settings' }
 
+function ShortcutsDialog({ settings, onClose }: { settings: Settings; onClose: () => void }) {
+  const shortcuts = [
+    ['Save clip', settings.hotkey],
+    ['Save short clip', settings.hotkeyShort],
+    ['Take screenshot', settings.screenshotHotkey],
+    ['Mark moment', settings.markHotkey],
+    ['Next / previous clip', '↓ / ↑ or J / K'],
+    ['Play / pause', 'Space'],
+    ['Open library from Watch', 'Escape'],
+    ['Search library', '/'],
+    ['Select all in library', 'Ctrl+A'],
+    ['Set editor in / out', '[ / ]'],
+    ['Show shortcuts', '?'],
+  ]
+  return <DialogFrame label="Keyboard shortcuts" onBackdrop={onClose} width={440}>
+    <h2 className="display" style={{ fontSize: 30, color: 'var(--fg)', marginBottom: 20 }}>Keyboard shortcuts</h2>
+    <div style={{ display: 'grid', gap: 12 }}>
+      {shortcuts.map(([label, key]) => <div key={label} className="flex items-center justify-between gap-4">
+        <span style={{ fontSize: 13, color: 'var(--muted)' }}>{label}</span>
+        <span className="keycap" style={{ color: 'var(--fg)', flexShrink: 0 }}>{key || 'Unset'}</span>
+      </div>)}
+    </div>
+    <div className="flex justify-end" style={{ marginTop: 24 }}>
+      <button onClick={onClose} className="btn">Close</button>
+    </div>
+  </DialogFrame>
+}
+
 // ── Window Controls ───────────────────────────────────────────────────────────
 
 // Drawn in React rather than via Electron's titleBarOverlay, which paints native
 // buttons on top of whatever the app puts in its own top-right corner.
-function WindowControls() {
-  const Button = ({ label, onClick, path, danger }: { label: string; onClick: () => void; path: string; danger?: boolean }) => (
+function WindowButton({ label, onClick, path, danger }: { label: string; onClick: () => void; path: string; danger?: boolean }) {
+  return (
     <button aria-label={label} title={label} onClick={onClick}
       className="w-12 h-full flex items-center justify-center transition-colors"
       style={{ color: 'var(--muted)' }}
@@ -58,12 +91,14 @@ function WindowControls() {
       </svg>
     </button>
   )
+}
 
+function WindowControls() {
   return (
     <div className="flex items-stretch self-stretch titlebar-no-drag" style={{ marginRight: -20 }}>
-      <Button label="Minimize" onClick={() => window.flash?.minimize()} path="M0 5h10" />
-      <Button label="Maximize" onClick={() => window.flash?.maximize()} path="M0.5 0.5h9v9h-9z" />
-      <Button label="Close to tray" onClick={() => window.flash?.close()} path="M0.5 0.5l9 9M9.5 0.5l-9 9" danger />
+      <WindowButton label="Minimize" onClick={() => window.flash?.minimize()} path="M0 5h10" />
+      <WindowButton label="Maximize" onClick={() => window.flash?.maximize()} path="M0.5 0.5h9v9h-9z" />
+      <WindowButton label="Close to tray" onClick={() => window.flash?.close()} path="M0.5 0.5l9 9M9.5 0.5l-9 9" danger />
     </div>
   )
 }
@@ -155,7 +190,7 @@ function TitleBar({ view, setView, overMedia, isRecording, onToggleRecording, de
           {isRecording ? 'Rec' : 'Idle'}
         </button>
 
-        <span className="keycap" title="Clip hotkey">{hotkey}</span>
+        <span className="keycap" title="Clip hotkey">{hotkey || 'Unset'}</span>
 
         <WindowControls />
       </div>
@@ -171,13 +206,28 @@ export default function App() {
   const [sharedClip, setSharedClip] = useState<SharedClipLink | null>(null)
   const [gameFilter, setGameFilter] = useState('All')
   const [starredOnly, setStarredOnly] = useState(false)
+  const [tagFilter, setTagFilter] = useState('')
   const [clipQuery, setClipQuery] = useState('')
+  const [dateRange, setDateRange] = useState<ClipTimeRange>('any')
+  const [filterNow, setFilterNow] = useState(() => Date.now())
   const [sort, setSort] = useState<SortOrder>('Recent')
   const [feedPath, setFeedPath] = useState('')
   const [editingClip, setEditingClip] = useState<Clip | null>(null)
+  useEffect(() => {
+    window.flash?.setEditorClip(editingClip?.filePath ?? null)
+    return () => window.flash?.setEditorClip(null)
+  }, [editingClip?.filePath])
+  useEffect(() => {
+    const refreshNow = () => setFilterNow(Date.now())
+    window.addEventListener('focus', refreshNow)
+    // Also every minute, so "Today" rolls over at midnight while the window stays focused.
+    const timer = window.setInterval(refreshNow, 60_000)
+    return () => { window.removeEventListener('focus', refreshNow); window.clearInterval(timer) }
+  }, [])
   const [feedbackOpen, setFeedbackOpen] = useState(false)
   const [update, setUpdate] = useState<{ status: 'idle' | 'downloading' | 'ready'; version?: string }>({ status: 'idle' })
-  const [updateDismissed, setUpdateDismissed] = useState(false)
+  // By version: the 4-hourly check re-announces the same update, a newer one should show.
+  const [dismissedUpdate, setDismissedUpdate] = useState<string | null>(null)
   const [feedbackSent, setFeedbackSent] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
   const [detectedGame, setDetectedGame] = useState<string | null>(null)
@@ -186,17 +236,40 @@ export default function App() {
   const selectionAnchor = useRef<string | null>(null)
   const [storage, setStorage] = useState({ used: 0, clips: 0 })
   const [settings, setSettings] = useState<Settings>({
-    clipsFolder: '', theme: DEFAULT_THEME, hotkey: 'F8', hotkeyShort: 'Shift+F8', screenshotHotkey: 'F9',
+    clipsFolder: '', theme: DEFAULT_THEME, hotkey: 'F8', hotkeyShort: 'Shift+F8', screenshotHotkey: 'F9', markHotkey: '',
     shortClipSeconds: 15, displayId: 0, overlay: true, overlayPosition: 'top-left',
     voiceEnabled: false, voicePhrase: '', voiceRawFloor: 0.5, voiceCooldownMs: 3000,
     quality: '1080p 60fps', bufferLength: 30,
-    audioCapture: true, audioLanes: DEFAULT_AUDIO_LANES, micDeviceId: '', autoSave: true, notifications: true, autoDeleteDays: 0,
+    audioCapture: true, audioTracks: DEFAULT_AUDIO_TRACKS, audioLanes: DEFAULT_AUDIO_LANES, micDeviceId: '', autoSave: true, notifications: true, autoDeleteDays: 0,
     perGame: {},
   })
+  const settingsRef = useRef(settings)
+  const settingsSave = useRef<Promise<void>>(Promise.resolve())
+  const settingsRevision = useRef(0)
   const [encoder, setEncoder] = useState('none')
   const [captureBackend, setCaptureBackend] = useState('unknown')
   const [captureAvailable, setCaptureAvailable] = useState(false)
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
+  const [shortcutsOpen, setShortcutsOpen] = useState(false)
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (shortcutsOpen && event.key === 'Escape') {
+        event.preventDefault()
+        event.stopImmediatePropagation()
+        setShortcutsOpen(false)
+        return
+      }
+      if (event.key !== '?' || event.repeat || event.ctrlKey || event.metaKey || event.altKey ||
+          shortcutsOpen || document.querySelector('[role="dialog"], [data-hotkey-listening="true"]')) return
+      const target = event.target
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement ||
+          target instanceof HTMLSelectElement || (target instanceof HTMLElement && target.isContentEditable)) return
+      event.preventDefault()
+      setShortcutsOpen(true)
+    }
+    window.addEventListener('keydown', onKey, true)
+    return () => window.removeEventListener('keydown', onKey, true)
+  }, [shortcutsOpen])
   const [autostart, setAutostart] = useState<AutostartState>(
     { enabled: false, managedByWindows: false, supported: false })
   // Re-read every time Settings is opened. Windows can have been changed
@@ -211,10 +284,10 @@ export default function App() {
     if (next) setAutostart(next)
   }, [autostart.enabled])
 
-  // All three keys, so a secondary hotkey lost to another app is visible in
+  // Every configured key, so a secondary hotkey lost to another app is visible in
   // Settings instead of looking fine and doing nothing.
   const [hotkeysRegistered, setHotkeysRegistered] = useState(
-    { hotkey: '', clip: true, short: true, screenshot: true })
+    { hotkey: '', clip: true, short: true, screenshot: true, mark: false })
   const [health, setHealth] = useState<CaptureHealth | null>(null)
   const [learnedGames, setLearnedGames] = useState<Record<string, string>>({})
   const [voiceStatus, setVoiceStatus] = useState<VoiceStatus>({
@@ -230,7 +303,8 @@ export default function App() {
     if (view !== 'Settings' || !window.flash) return
     let cancelled = false
     const read = async () => {
-      if (settingsPollBusy.current) return
+      // A hidden window shows nothing, so skip the IPC until it is visible again.
+      if (document.hidden || settingsPollBusy.current) return
       settingsPollBusy.current = true
       try {
         let captureStatus: any = null
@@ -256,6 +330,7 @@ export default function App() {
           buffered: s.bufferSeconds ?? 0,
           audioMode: s.audioMode,
           error: s.captureError,
+          audioError: microphoneError(s.audioError, settingsRef.current.audioCapture && settingsRef.current.audioTracks.mic),
         })
         if (s.encoder) setEncoder(s.encoder)
         if (s.captureBackend) setCaptureBackend(s.captureBackend)
@@ -301,6 +376,7 @@ export default function App() {
         window.flash.getStorage(),
       ])
       if (requestId !== refreshClipsRequest.current) return
+      retainThumbnails(clipList)
       setClips(clipList)
       setStorage(storageInfo)
     } catch (error) {
@@ -318,25 +394,42 @@ export default function App() {
     .sort((a, b) => b.count - a.count)
 
   const allGames = clips.length > 0 ? [{ name: 'All', count: clips.length }, ...games] : []
+  const allTags = useMemo(() => {
+    const byKey = new Map<string, string>()
+    for (const clip of clips) for (const tag of clip.tags) {
+      const key = tag.toLocaleLowerCase()
+      if (!byKey.has(key)) byKey.set(key, tag)
+    }
+    return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b))
+  }, [clips])
+  // The last clip carrying the filtered tag can lose it; do not leave a filter with no option.
+  useEffect(() => {
+    if (tagFilter && !allTags.some(tag => tag.toLocaleLowerCase() === tagFilter)) setTagFilter('')
+  }, [allTags, tagFilter])
 
   // One list drives both the feed and the library, so the clip after this one
   // in the feed is the tile after it in the grid.
   const shownClips = useMemo(() => {
     const byGame = gameFilter === 'All' ? clips : clips.filter(c => c.game === gameFilter)
     const byStar = starredOnly ? byGame.filter(c => c.starred) : byGame
-    const byQuery = clipQuery ? byStar.filter(clip => matchesQuery(clip, clipQuery)) : byStar
-    return sortClips(byQuery, sort)
-  }, [clips, gameFilter, starredOnly, clipQuery, sort])
-  const filtered = gameFilter !== 'All' || starredOnly || clipQuery !== ''
+    const byTag = tagFilter ? byStar.filter(c => c.tags.some(tag => tag.toLocaleLowerCase() === tagFilter)) : byStar
+    const byQuery = clipQuery ? byTag.filter(clip => matchesQuery(clip, clipQuery)) : byTag
+    const cutoff = rangeCutoff(dateRange, filterNow)
+    const byDate = cutoff === null ? byQuery : byQuery.filter(clip => clip.createdAt > 0 && clip.createdAt >= cutoff)
+    return sortClips(byDate, sort)
+  }, [clips, gameFilter, starredOnly, tagFilter, clipQuery, dateRange, filterNow, sort])
+  const filtered = gameFilter !== 'All' || starredOnly || tagFilter !== '' || clipQuery !== '' || dateRange !== 'any'
   const filterLabel = [
     gameFilter === 'All' ? 'All games' : gameFilter,
     starredOnly ? 'Starred' : '',
+    tagFilter ? `Tag: ${allTags.find(tag => tag.toLocaleLowerCase() === tagFilter) ?? tagFilter}` : '',
     clipQuery ? `“${clipQuery}”` : '',
+    dateRange === 'any' ? '' : dateRange === 'today' ? 'Today' : dateRange === '7days' ? 'Last 7 days' : 'Last 30 days',
   ].filter(Boolean).join(' · ')
   const selectedClips = useMemo(() => clips.filter(clip => selectedIds.has(clip.id)), [clips, selectedIds])
 
   const clearFilters = useCallback(() => {
-    setGameFilter('All'); setStarredOnly(false); setClipQuery('')
+    setGameFilter('All'); setStarredOnly(false); setTagFilter(''); setClipQuery(''); setDateRange('any')
   }, [])
 
   const clearSelected = useCallback(() => {
@@ -372,20 +465,43 @@ export default function App() {
     })
   }, [clips])
 
-  const updateSettings = useCallback(async (partial: Partial<Settings>) => {
+  const updateSettings = useCallback((change: Partial<Settings> | ((current: Settings) => Partial<Settings>)) => {
     if (!window.flash) return
-    const updated = await window.flash.setSettings(partial)
-    setSettings(updated)
-    if (partial.clipsFolder) refreshClips()
-    // A rebind can fail if another program already owns the key.
-    if (partial.hotkey !== undefined || partial.hotkeyShort !== undefined || partial.screenshotHotkey !== undefined) {
-      const status = await window.flash.getHotkeyStatus()
-      setHotkeysRegistered(status)
-    }
-    if (partial.voiceEnabled !== undefined || partial.voicePhrase !== undefined
-      || partial.voiceRawFloor !== undefined || partial.voiceCooldownMs !== undefined) {
-      setVoiceStatus(await window.flash.getVoiceStatus())
-    }
+    const partial = typeof change === 'function' ? change(settingsRef.current) : change
+    settingsRef.current = { ...settingsRef.current, ...partial }
+    setSettings(settingsRef.current)
+    const revision = ++settingsRevision.current
+    settingsSave.current = settingsSave.current.then(async () => {
+      try {
+        const updated = await window.flash!.setSettings(partial)
+        if (revision === settingsRevision.current) {
+          settingsRef.current = updated
+          setSettings(updated)
+        }
+        if (partial.clipsFolder) refreshClips()
+        // A rebind can fail if another program already owns the key.
+        if (partial.hotkey !== undefined || partial.hotkeyShort !== undefined || partial.screenshotHotkey !== undefined || partial.markHotkey !== undefined) {
+          setHotkeysRegistered(await window.flash!.getHotkeyStatus())
+        }
+        if (partial.voiceEnabled !== undefined || partial.voicePhrase !== undefined
+          || partial.voiceRawFloor !== undefined || partial.voiceCooldownMs !== undefined) {
+          setVoiceStatus(await window.flash!.getVoiceStatus())
+        }
+      } catch (error) {
+        console.error('Could not save settings', error)
+        if (revision === settingsRevision.current) {
+          try {
+            const actual = await window.flash!.getSettings()
+            if (revision === settingsRevision.current) {
+              settingsRef.current = actual
+              setSettings(actual)
+            }
+          } catch (readError) {
+            console.error('Could not reload settings', readError)
+          }
+        }
+      }
+    })
   }, [refreshClips])
 
   // Confirmation lives here so the feed and the library get the same dialog
@@ -412,9 +528,13 @@ export default function App() {
     if (!count) return
     const itemWord = count === 1 ? 'item' : 'items'
     const size = selection.reduce((total, clip) => total + clip.size, 0)
+    // Filtering keeps the selection, so say when some of it is off screen.
+    const shownIds = new Set(shownClips.map(clip => clip.id))
+    const hidden = selection.filter(clip => !shownIds.has(clip.id)).length
+    const hiddenNote = hidden ? ` ${hidden} of them ${hidden === 1 ? 'is' : 'are'} hidden by the current filters.` : ''
     setConfirmRequest({
       title: `Delete ${count} ${itemWord}?`,
-      body: `${count} selected ${itemWord} (${formatBytes(size)}) will be permanently deleted from disk.`,
+      body: `${count} selected ${itemWord} (${formatBytes(size)}) will be permanently deleted from disk.${hiddenNote}`,
       confirmLabel: 'Delete',
       destructive: true,
       onConfirm: async () => {
@@ -425,12 +545,14 @@ export default function App() {
             .map(result => result.status === 'fulfilled' ? result.value?.error : undefined)
             .find((message): message is string => !!message)
           setSaveState(state => ({ ...state, error: reason || `Could not delete ${failed.length} of ${count} ${itemWord}.` }))
+        } else {
+          clearSelected()
         }
-        clearSelected()
+        // Refresh drops deleted IDs from the selection; failed ones stay for a retry.
         await refreshClips()
       },
     })
-  }, [clearSelected, refreshClips, selectedClips])
+  }, [clearSelected, refreshClips, selectedClips, shownClips])
 
   // Written to the clip's sidecar, so the answer survives a settings reset and
   // travels with the file. The list is updated optimistically because the round
@@ -443,6 +565,14 @@ export default function App() {
       setClips(current => current.map(c => c.filePath === clip.filePath ? { ...c, starred: clip.starred } : c))
       setSaveState(state => ({ ...state, error: result?.error ?? 'Could not update the star' }))
     }
+  }, [])
+
+  const setClipTags = useCallback(async (clip: Clip, tags: string[]): Promise<string | null> => {
+    if (!window.flash) return 'Tagging is unavailable'
+    const result = await window.flash.setClipTags(clip.filePath, tags)
+    if (result.error || !result.tags) return result.error ?? 'Could not update tags'
+    setClips(current => current.map(c => c.filePath === clip.filePath ? { ...c, tags: result.tags! } : c))
+    return null
   }, [])
 
   const renameClip = useCallback(async (clip: Clip, name: string) => {
@@ -486,7 +616,12 @@ export default function App() {
     unsubscribe.push(window.flash.onRecordingState(setIsRecording))
     unsubscribe.push(window.flash.onNavigate((target: string) => setView(target === 'Settings' ? 'Settings' : target === 'Feed' ? 'Feed' : 'Library')))
     window.flash.getRecordingState().then(setIsRecording)
-    window.flash.getSettings().then(setSettings)
+    window.flash.getSettings().then(value => {
+      if (settingsRevision.current === 0) {
+        settingsRef.current = value
+        setSettings(value)
+      }
+    })
     window.flash.getVoiceStatus().then(setVoiceStatus)
     window.flash.getHotkeyStatus().then(setHotkeysRegistered)
     window.flash.getAutostart().then(setAutostart)
@@ -522,8 +657,8 @@ export default function App() {
   const emptyHint = !captureAvailable
     ? 'The capture engine is unavailable. Check that the native addon is built.'
     : isRecording
-      ? <>Flash is holding the last {settings.bufferLength} seconds. Press <span className="keycap" style={{ color: 'var(--fg)' }}>{settings.hotkey}</span> in game to keep them.</>
-      : <>Start the replay buffer from the Idle button above, then press <span className="keycap" style={{ color: 'var(--fg)' }}>{settings.hotkey}</span> in game.</>
+      ? <>Flash is holding the last {settings.bufferLength} seconds. {settings.hotkey ? <>Press <span className="keycap" style={{ color: 'var(--fg)' }}>{settings.hotkey}</span> in game to keep them.</> : 'Use Save clip to keep them.'}</>
+      : <>Start the replay buffer from the Idle button above, then {settings.hotkey ? <>press <span className="keycap" style={{ color: 'var(--fg)' }}>{settings.hotkey}</span> in game.</> : 'use Save clip to keep a moment.'}</>
 
   return (
     <div className="relative" style={{ width: '100vw', height: '100vh', background: 'var(--bg)', overflow: 'hidden' }}>
@@ -535,12 +670,12 @@ export default function App() {
         onFeedback={() => setFeedbackOpen(true)}
       />
 
-      {update.status === 'ready' && !updateDismissed && (
+      {update.status === 'ready' && (update.version ?? '') !== dismissedUpdate && (
         <div role="status" className="absolute flex items-center gap-3"
           style={{ zIndex: 40, right: 20, bottom: 20, padding: '10px 14px', borderRadius: 14, background: 'var(--surface, #16161a)', border: '1px solid var(--edge-soft)', boxShadow: '0 8px 30px rgba(0,0,0,0.4)' }}>
           <span style={{ fontSize: 13 }}>Update ready{update.version ? ` (${update.version})` : ''}</span>
           <button className="btn btn-sm" onClick={() => window.flash?.installUpdate()}>Restart to update</button>
-          <button className="btn btn-sm btn-ghost" onClick={() => setUpdateDismissed(true)}>Later</button>
+          <button className="btn btn-sm btn-ghost" onClick={() => setDismissedUpdate(update.version ?? '')}>Later</button>
         </div>
       )}
 
@@ -574,7 +709,9 @@ export default function App() {
           games={allGames} gameFilter={gameFilter} setGameFilter={setGameFilter}
           starredOnly={starredOnly} setStarredOnly={setStarredOnly}
           starredCount={clips.filter(c => c.starred).length}
+          allClips={clips} tags={allTags} tagFilter={tagFilter} setTagFilter={setTagFilter}
           sort={sort} setSort={setSort}
+          dateRange={dateRange} setDateRange={range => { setDateRange(range); clearSelected() }}
           query={clipQuery} onQueryChange={setClipQuery}
           storage={storage} onOpenFolder={() => window.flash?.openClipsFolder()}
           shortcutsEnabled={view === 'Library' && editingClip === null}
@@ -586,6 +723,7 @@ export default function App() {
           onOpenClip={clip => { setFeedPath(clip.filePath); setView('Feed') }}
           onDeleteClip={deleteClip}
           onStarClip={starClip}
+          onSetTags={setClipTags}
           suspendThumbnails={editingClip !== null}
           emptyHint={emptyHint}
         />
@@ -593,16 +731,27 @@ export default function App() {
           <SelectionBar
             items={selectedClips}
             games={games.map(game => game.name)}
+            tags={allTags}
+            onTagsChanged={updated => setClips(current => current.map(clip => {
+              const tags = updated.get(clip.filePath)
+              return tags ? { ...clip, tags } : clip
+            }))}
             onClear={clearSelected}
             onDelete={deleteSelection}
             onRefresh={refreshClips}
+            onConfirmShare={(count, onConfirm) => setConfirmRequest({
+              title: `Share ${count} clips?`,
+              body: `${count} selected clips will be uploaded. Their links are public and can be opened by anyone with a link.`,
+              confirmLabel: 'Share',
+              onConfirm,
+            })}
           />
         )}
       </main>
 
       {view === 'Settings' && (
         <main className="absolute inset-0 flex flex-col" style={{ top: 48 }}>
-          <SettingsView
+          <Suspense fallback={null}><SettingsView
             previewClip={clips.filter(clip => clip.kind !== 'shot').sort((x, y) => y.createdAt - x.createdAt)[0]?.filePath}
             settings={settings} onChange={updateSettings} storage={storage} encoder={encoder}
             captureBackend={captureBackend}
@@ -613,22 +762,26 @@ export default function App() {
             onForgetGame={async exe => setLearnedGames(await window.flash!.forgetGame(exe))}
             onOpenFolder={() => window.flash?.openClipsFolder()}
             onPickFolder={async () => {
-              const folder = await window.flash?.pickClipsFolder()
-              if (folder) { setSettings(s => ({ ...s, clipsFolder: folder })); refreshClips() }
+              try {
+                const folder = await window.flash?.pickClipsFolder()
+                if (folder) { ++settingsRevision.current; settingsRef.current = { ...settingsRef.current, clipsFolder: folder }; setSettings(settingsRef.current); refreshClips() }
+              } catch (error) {
+                setSaveState({ saving: false, error: error instanceof Error ? error.message : 'Could not change clips folder' })
+              }
             }}
-          />
+          /></Suspense>
         </main>
       )}
 
       {view === 'Shared' && sharedClip && <SharedClipView link={sharedClip} />}
 
       {editingClip && (
-        <Editor clip={editingClip} onClose={() => setEditingClip(null)} />
+        <Suspense fallback={null}><Editor clip={editingClip} onClose={() => { setEditingClip(null); refreshClips() }} /></Suspense>
       )}
-      {feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} onSent={() => {
+      {feedbackOpen && <Suspense fallback={null}><FeedbackDialog onClose={() => setFeedbackOpen(false)} onSent={() => {
         setFeedbackSent(true)
         setTimeout(() => setFeedbackSent(false), 4000)
-      }} />}
+      }} /></Suspense>}
       {feedbackSent && (
         <div role="status" className="fixed z-[110]"
           style={{
@@ -641,6 +794,7 @@ export default function App() {
       {confirmRequest && (
         <ConfirmDialog request={confirmRequest} onClose={() => setConfirmRequest(null)} />
       )}
+      {shortcutsOpen && <ShortcutsDialog settings={settings} onClose={() => setShortcutsOpen(false)} />}
     </div>
   )
 }

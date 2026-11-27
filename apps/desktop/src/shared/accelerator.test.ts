@@ -11,6 +11,8 @@ assert.equal(press('F8'), 'F8')
 assert.equal(press('KeyG'), 'G')
 assert.equal(press('Digit4'), '4')
 assert.equal(press('Numpad7'), 'num7')
+assert.deepEqual(['NumpadAdd', 'NumpadSubtract', 'NumpadMultiply', 'NumpadDivide', 'NumpadDecimal'].map(code => press(code)),
+  ['numadd', 'numsub', 'nummult', 'numdiv', 'numdec'])
 assert.equal(press('Backquote'), '`')
 assert.equal(press('ArrowUp'), 'Up')
 

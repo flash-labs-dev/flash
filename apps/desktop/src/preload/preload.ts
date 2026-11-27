@@ -25,6 +25,9 @@ export interface ClipInfo {
   size: number
   createdAt: number
   starred: boolean
+  tags: string[]
+  marksSec: number[]
+  trim?: { inSec: number; outSec: number }
 }
 
 export interface AutostartState {
@@ -40,6 +43,7 @@ export interface Settings {
   hotkey: string
   hotkeyShort: string
   screenshotHotkey: string
+  markHotkey: string
   shortClipSeconds: number
   voiceEnabled: boolean
   voicePhrase: string
@@ -51,6 +55,7 @@ export interface Settings {
   quality: string
   bufferLength: number
   audioCapture: boolean
+  audioTracks: import('../shared/audioLanes').AudioTracksSetting
   audioLanes: { discord: string[]; music: string[] }
   micDeviceId: string
   autoSave: boolean
@@ -87,7 +92,14 @@ contextBridge.exposeInMainWorld('flash', {
   renameClip: (filePath: string, name: string) => ipcRenderer.invoke('rename-clip', filePath, name),
   setClipStarred: (filePath: string, starred: boolean) =>
     ipcRenderer.invoke('set-clip-starred', filePath, starred),
+  setClipTags: (filePath: string, tags: string[]) =>
+    ipcRenderer.invoke('set-clip-tags', filePath, tags),
+  changeClipTagsBatch: (filePaths: string[], tag: string, action: 'add' | 'remove') =>
+    ipcRenderer.invoke('change-clip-tags-batch', filePaths, tag, action),
+  setClipTrim: (filePath: string, trim: { inSec: number; outSec: number }, durationSec: number) =>
+    ipcRenderer.invoke('set-clip-trim', filePath, trim, durationSec),
   openClip: (filePath: string) => ipcRenderer.invoke('open-clip', filePath),
+  setEditorClip: (filePath: string | null) => ipcRenderer.send('set-editor-clip', filePath),
   openClipsFolder: () => ipcRenderer.invoke('open-clips-folder'),
   showClipInFolder: (filePath: string) => ipcRenderer.invoke('show-clip-in-folder', filePath),
   startClipDrag: (filePaths: string | string[]) => ipcRenderer.send(
@@ -95,14 +107,15 @@ contextBridge.exposeInMainWorld('flash', {
   moveClips: (filePaths: string[], game: string) => ipcRenderer.invoke('move-clips', filePaths, game),
   copyClipFile: (filePath: string) => ipcRenderer.invoke('copy-clip-file', filePath),
   shareClipLink: (filePath: string) => ipcRenderer.invoke('share-clip-link', filePath),
+  setBatchShareClips: (filePaths: string[] | null, token?: string) => ipcRenderer.invoke('set-batch-share-clips', filePaths, token),
   saveSharedClip: (mp4Url: string) => ipcRenderer.invoke('save-shared-clip', mp4Url),
   onOpenSharedClip: (callback: (link: SharedClipLink) => void) => {
     sharedClipListeners.add(callback)
     if (latestSharedClip) queueMicrotask(() => { if (latestSharedClip && sharedClipListeners.has(callback)) callback(latestSharedClip) })
     return () => { sharedClipListeners.delete(callback) }
   },
-  readThumbnail: (filePath: string) => ipcRenderer.invoke('thumbnail-read', filePath),
-  writeThumbnail: (filePath: string, bytes: Uint8Array) => ipcRenderer.invoke('thumbnail-write', filePath, bytes),
+  readThumbnail: (filePath: string, markSec?: number | null) => ipcRenderer.invoke('thumbnail-read', filePath, markSec),
+  writeThumbnail: (filePath: string, bytes: Uint8Array, markSec?: number | null) => ipcRenderer.invoke('thumbnail-write', filePath, bytes, markSec),
   saveClipFrame: (filePath: string, playheadSeconds: number, bytes: Uint8Array) =>
     ipcRenderer.invoke('save-clip-frame', filePath, playheadSeconds, bytes),
   trimClip: (filePath: string, start: number, end: number) =>
@@ -191,17 +204,24 @@ export type FlashAPI = {
   deleteClip: (filePath: string) => Promise<{ deleted: boolean; error?: string }>
   renameClip: (filePath: string, name: string) => Promise<{ filePath?: string; error?: string }>
   setClipStarred: (filePath: string, starred: boolean) => Promise<{ starred?: boolean; error?: string }>
+  setClipTags: (filePath: string, tags: string[]) => Promise<{ tags?: string[]; error?: string }>
+  changeClipTagsBatch: (filePaths: string[], tag: string, action: 'add' | 'remove') =>
+    Promise<{ updated: { filePath: string; tags: string[] }[]; failed: number; error?: string }>
+  setClipTrim: (filePath: string, trim: { inSec: number; outSec: number }, durationSec: number) =>
+    Promise<{ trim?: { inSec: number; outSec: number }; error?: string }>
   openClip: (filePath: string) => Promise<void>
+  setEditorClip: (filePath: string | null) => void
   openClipsFolder: () => Promise<void>
   showClipInFolder: (filePath: string) => Promise<void>
   startClipDrag: (filePaths: string | string[]) => void
   moveClips: (filePaths: string[], game: string) => Promise<{ moved: number; error?: string }>
   copyClipFile: (filePath: string) => Promise<boolean>
   shareClipLink: (filePath: string) => Promise<{ ok: true; url: string; days: number } | { ok: false; error: string }>
+  setBatchShareClips: (filePaths: string[] | null, token?: string) => Promise<string | null>
   saveSharedClip: (mp4Url: string) => Promise<{ path?: string; error?: string }>
   onOpenSharedClip: (callback: (link: { id: string; mp4Url: string }) => void) => () => void
-  readThumbnail: (filePath: string) => Promise<Uint8Array | null>
-  writeThumbnail: (filePath: string, bytes: Uint8Array) => Promise<boolean>
+  readThumbnail: (filePath: string, markSec?: number | null) => Promise<Uint8Array | null>
+  writeThumbnail: (filePath: string, bytes: Uint8Array, markSec?: number | null) => Promise<boolean>
   saveClipFrame: (filePath: string, playheadSeconds: number, bytes: Uint8Array) =>
     Promise<{ path?: string; error?: string }>
   trimClip: (filePath: string, start: number, end: number) =>
@@ -224,9 +244,9 @@ export type FlashAPI = {
   getSettings: () => Promise<Settings>
   getHotkeyStatus: () => Promise<{
     hotkey: string
-    // One flag per key: the clip, short-clip and screenshot accelerators can
+    // One flag per key: the clip, short-clip, screenshot and mark accelerators can
     // each be taken by another app independently.
-    clip: boolean; short: boolean; screenshot: boolean
+    clip: boolean; short: boolean; screenshot: boolean; mark: boolean
   }>
   // `enabled` is what Windows says, not what was last asked for.
   // `managedByWindows` means Flash is listed but Task Manager has disabled it.

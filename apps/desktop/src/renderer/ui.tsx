@@ -16,6 +16,8 @@ export interface Clip {
   size: number
   createdAt: number
   starred: boolean
+  tags: string[]
+  marksSec: number[]
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -155,6 +157,14 @@ export function RenameTitle({ title, display, onCommit, className, style }: {
 
   useEffect(() => { if (!editing) setValue(title) }, [title, editing])
 
+  // Leaving the rename box would otherwise drop keyboard focus onto the page.
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const wasEditing = useRef(false)
+  useEffect(() => {
+    if (!editing && wasEditing.current) triggerRef.current?.focus()
+    wasEditing.current = editing
+  }, [editing])
+
   const commit = async () => {
     if (busy) return
     if (value.trim() === title) { setEditing(false); setError(null); return }
@@ -169,7 +179,7 @@ export function RenameTitle({ title, display, onCommit, className, style }: {
 
   if (!editing) {
     return (
-      <button type="button" title="Rename" onClick={event => { event.stopPropagation(); setEditing(true) }}
+      <button ref={triggerRef} type="button" title="Rename" onClick={event => { event.stopPropagation(); setEditing(true) }}
         className={`group flex items-end gap-3 min-w-0 text-left ${className ?? ''}`} style={{ maxWidth: '100%', ...style }}>
         <span className="truncate" style={{ paddingBottom: '0.04em' }}>{display ?? title}</span>
         <span className="opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100 transition-opacity shrink-0"
@@ -206,7 +216,7 @@ export function RenameTitle({ title, display, onCommit, className, style }: {
 
 // ── Dialogs ───────────────────────────────────────────────────────────────────
 
-function DialogFrame({ label, onBackdrop, width = 400, children }: {
+export function DialogFrame({ label, onBackdrop, width = 400, children }: {
   label: string
   onBackdrop?: () => void
   width?: number
@@ -217,7 +227,7 @@ function DialogFrame({ label, onBackdrop, width = 400, children }: {
     const previous = document.activeElement as HTMLElement | null
     const dialog = dialogRef.current!
     const focusable = () => Array.from(dialog.querySelectorAll<HTMLElement>(
-      'button:not(:disabled), input:not(:disabled), [tabindex="0"]'))
+      'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), [tabindex="0"]'))
     focusable()[0]?.focus()
     const contain = (event: FocusEvent) => {
       if (!dialog.contains(event.target as Node)) focusable()[0]?.focus()
@@ -235,6 +245,9 @@ function DialogFrame({ label, onBackdrop, width = 400, children }: {
       document.removeEventListener('focusin', contain)
       dialog.removeEventListener('keydown', onKey)
       if (previous?.isConnected) previous.focus()
+      else Array.from(document.querySelectorAll<HTMLElement>(
+        'button:not(:disabled), input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex="0"]'))
+        .find(control => control.isConnected && !dialog.contains(control) && control.getClientRects().length)?.focus()
     }
   }, [])
   return (
@@ -265,13 +278,16 @@ export interface ConfirmRequest {
 export function ConfirmDialog({ request, onClose }: { request: ConfirmRequest; onClose: () => void }) {
   const accepted = useRef(false)
   const [error, setError] = useState<string | null>(null)
+  // A confirm that settles after Cancel or Escape must not close a newer dialog.
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   const accept = useCallback(async () => {
     if (accepted.current) return
     accepted.current = true
     setError(null)
     try {
       await request.onConfirm()
-      onClose()
+      if (mounted.current) onClose()
     } catch (err) {
       accepted.current = false
       setError(err instanceof Error ? err.message : 'Something went wrong')

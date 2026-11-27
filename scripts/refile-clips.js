@@ -16,8 +16,9 @@
 
 const { existsSync, readdirSync, mkdirSync, writeFileSync, readFileSync, renameSync, statSync } = require('fs')
 const { join, dirname, basename } = require('path')
+const { pathToFileURL } = require('url')
 
-const LIBRARY = process.env.FLASH_CLIPS || 'C:/Users/emers/Videos/Flash'
+const LIBRARY = process.env.FLASH_CLIPS || join(require('os').homedir(), 'Videos', 'Flash')
 
 function listClips() {
   const clips = []
@@ -49,7 +50,7 @@ async function extract(outDir) {
 
   const index = []
   for (const clip of clips) {
-    const url = 'file:///' + clip.path.replace(/\\/g, '/')
+    const url = pathToFileURL(clip.path).href  // escapes # ? % in names
     const dataUrl = await win.webContents.executeJavaScript(`
       new Promise(resolve => {
         const v = document.getElementById('v'), c = document.getElementById('c')
@@ -93,12 +94,12 @@ function apply(movesFile, dryRun) {
     renameSync(from, to)
     // The sidecar carries the game name too, so move and rewrite it or the
     // library will keep showing the old one.
-    const sidecarFrom = from.replace(/\.mp4$/i, '.json')
+    const sidecarFrom = `${from}.json`
     if (existsSync(sidecarFrom)) {
       try {
         const data = JSON.parse(readFileSync(sidecarFrom, 'utf8'))
         data.game = game
-        writeFileSync(to.replace(/\.mp4$/i, '.json'), JSON.stringify(data))
+        writeFileSync(`${to}.json`, JSON.stringify(data))
         require('fs').unlinkSync(sidecarFrom)
       } catch { /* sidecar is an optimisation, not required */ }
     }

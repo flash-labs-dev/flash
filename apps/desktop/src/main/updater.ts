@@ -22,8 +22,9 @@ export function getUpdateState(): UpdateState {
 
 // Restart now into the downloaded update. Only does anything once one is ready.
 export function installUpdateNow() {
-  if (state.status !== 'ready') return
+  if (state.status !== 'ready') return false
   autoUpdater.quitAndInstall(true, true)
+  return true
 }
 
 function setState(next: UpdateState) {
@@ -47,7 +48,10 @@ export function startAutoUpdate(listener: (state: UpdateState) => void) {
   autoUpdater.on('update-downloaded', (info) => setState({ status: 'ready', version: info.version }))
   // A failed check is ordinary - offline, rate limited, no release yet - and
   // the next interval tries again.
-  autoUpdater.on('error', (error) => console.warn('Auto-update:', error?.message ?? error))
+  autoUpdater.on('error', (error) => {
+    console.warn('Auto-update:', error?.message ?? error)
+    if (state.status === 'downloading') setState({ status: 'idle' })
+  })
 
   const check = () => { autoUpdater.checkForUpdates().catch((error) => console.warn('Auto-update check failed:', error?.message ?? error)) }
   setTimeout(check, CHECK_DELAY_MS)

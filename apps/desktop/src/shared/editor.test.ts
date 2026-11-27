@@ -1,7 +1,7 @@
 // Self-check for the clip editor maths. Run with:
 //   node --experimental-strip-types src/shared/editor.test.ts
 import { strict as assert } from 'node:assert'
-import { formatTimecode, clampRange, nearestKeyframe, deriveSaveMode, matchesQuery } from './editor.ts'
+import { formatTimecode, clampRange, keepLastRange, nearestKeyframe, deriveSaveMode, matchesQuery } from './editor.ts'
 import { reducePeaks, clipUrl } from './editor.ts'
 
 const searchableClips = [
@@ -21,6 +21,9 @@ assert.deepEqual(autoNamed.filter(clip => matchesQuery(clip, 'october')).map(cli
 assert.equal(formatTimecode(0), '0:00.0')
 assert.equal(formatTimecode(4.24), '0:04.2')
 assert.equal(formatTimecode(65.98), '1:05.9')
+assert.equal(formatTimecode(2.3), '0:02.3')
+assert.equal(formatTimecode(62.3), '1:02.3')
+assert.equal(formatTimecode(59.99), '0:59.9')
 assert.equal(formatTimecode(-3), '0:00.0')
 assert.equal(formatTimecode(NaN), '0:00.0')
 
@@ -59,6 +62,14 @@ assert.equal(nearestKeyframe(keys, 0, 0), 0)              // exact hit needs no 
 
 // With two keyframes inside the window it takes the closer one, not the first.
 assert.equal(nearestKeyframe([3.6, 3.9], 3.85, 0.5), 3.9)
+
+// Tail presets end at the clip boundary and never snap forward into a shorter cut.
+assert.deepEqual(keepLastRange(50, 15, [], 0.15), { inSec: 35, outSec: 50 })
+assert.deepEqual(keepLastRange(50, 30, [19.9, 20.04], 0.15), { inSec: 19.9, outSec: 50 })
+assert.deepEqual(keepLastRange(50, 15, [35.04], 0.15), { inSec: 35, outSec: 50 })
+assert.deepEqual(keepLastRange(50, 15, [34.7], 0.15), { inSec: 35, outSec: 50 })
+assert.equal(keepLastRange(15, 15, [], 0.15), null)
+assert.equal(keepLastRange(10, 30, [], 0.15), null)
 
 // One bucket per sample is the identity on magnitude.
 const four = reducePeaks(new Float32Array([0, 0.5, -1, 0.25]), 4)

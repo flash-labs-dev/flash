@@ -5,7 +5,7 @@ import {
   FEEDBACK_ENDPOINT, FEEDBACK_MAX_LENGTH, FEEDBACK_MIN_LENGTH, validateFeedback,
 } from './feedback.ts'
 
-assert.equal(FEEDBACK_ENDPOINT, 'https://lubuntuserver.tail857ab5.ts.net:10000/flash-feedback')
+assert.equal(FEEDBACK_ENDPOINT, 'https://flashclipping.fyi/api/feedback')
 assert.equal(FEEDBACK_MIN_LENGTH, 3)
 assert.equal(FEEDBACK_MAX_LENGTH, 2000)
 

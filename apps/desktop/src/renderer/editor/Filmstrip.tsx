@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { clampRange, clipUrl, nearestKeyframe } from '../../shared/editor'
+import { nearestTrimMark } from '../../shared/trimMarkSnap'
 
 const THUMBNAIL_COUNT = 10
 
@@ -61,19 +62,26 @@ function useFilmstripThumbnails(source: string, durationSec: number, canvasRef: 
 }
 
 // The scrubber.
-export function Filmstrip({ filePath, durationSec, inSec, outSec, currentSec, keyframesSec, onChange, onScrub }: {
+export function Filmstrip({ filePath, durationSec, inSec, outSec, currentSec, keyframesSec, marksSec, onChange, onScrub, onDragStart, onDragEnd }: {
   filePath: string
   durationSec: number
   inSec: number
   outSec: number
   currentSec: number
   keyframesSec: number[]
+  marksSec: number[]
   onChange: (range: { inSec: number; outSec: number }) => void
   onScrub: (seconds: number) => void
+  onDragStart: () => void
+  onDragEnd: () => void
 }) {
   const trackRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [dragging, setDragging] = useState<Handle | null>(null)
+  const draggingRef = useRef<Handle | null>(null)
+  const keyCommitTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const keyEditing = useRef(false)
+  const [scrubbing, setScrubbing] = useState<number | null>(null)
   const source = clipUrl(filePath)
   const safeDuration = durationSec > 0 ? durationSec : 0
   const percent = (seconds: number) => safeDuration > 0 ? (seconds / safeDuration) * 100 : 0
@@ -88,33 +96,75 @@ export function Filmstrip({ filePath, durationSec, inSec, outSec, currentSec, ke
     return Math.min(Math.max(ratio, 0), 1) * safeDuration
   }, [safeDuration])
 
-  const moveHandle = useCallback((handle: Handle, seconds: number) => {
-    const snapped = nearestKeyframe(keyframesSec, seconds, TRIM_SNAP_SEC) ?? seconds
+  const moveHandle = useCallback((handle: Handle, seconds: number, snap = true) => {
+    const snapped = snap ? nearestKeyframe(keyframesSec, seconds, TRIM_SNAP_SEC) ?? seconds : seconds
     onChange(handle === 'in'
       ? clampRange(snapped, outSec, safeDuration)
       : clampRange(inSec, snapped, safeDuration))
   }, [keyframesSec, inSec, outSec, safeDuration, onChange])
 
+  const movePointerHandle = (handle: Handle, event: React.PointerEvent) => {
+    const seconds = secondsAt(event.clientX)
+    if (event.altKey) { moveHandle(handle, seconds, false); return }
+    const box = trackRef.current?.getBoundingClientRect()
+    const mark = box ? nearestTrimMark(event.clientX, box.left, box.width, safeDuration,
+      marksSec, handle === 'in' ? 0 : inSec + 0.1, handle === 'in' ? outSec - 0.1 : safeDuration)
+      : null
+    moveHandle(handle, mark ?? seconds, mark === null)
+  }
+
+  useEffect(() => () => {
+    if (keyCommitTimer.current) clearTimeout(keyCommitTimer.current)
+  }, [])
+
   useEffect(() => {
-    if (!dragging) return
-    const onMove = (event: PointerEvent) => moveHandle(dragging, secondsAt(event.clientX))
-    const onUp = () => setDragging(null)
+    if (scrubbing === null) return
+    const onMove = (event: PointerEvent) => {
+      if (event.pointerId === scrubbing) onScrub(secondsAt(event.clientX))
+    }
+    const onUp = (event: PointerEvent) => {
+      if (event.pointerId !== scrubbing) return
+      onScrub(secondsAt(event.clientX))
+      setScrubbing(null)
+    }
+    const onCancel = (event: PointerEvent) => {
+      if (event.pointerId === scrubbing) setScrubbing(null)
+    }
     window.addEventListener('pointermove', onMove)
     window.addEventListener('pointerup', onUp)
+    window.addEventListener('pointercancel', onCancel)
     return () => {
       window.removeEventListener('pointermove', onMove)
       window.removeEventListener('pointerup', onUp)
+      window.removeEventListener('pointercancel', onCancel)
     }
-  }, [dragging, moveHandle, secondsAt])
+  }, [scrubbing, secondsAt, onScrub])
 
   // A handle that can only be dragged is unusable without a mouse. Arrows act
   // only while a handle holds focus, so they cannot fire by accident elsewhere
   // on the screen.
   const onHandleKey = (handle: Handle) => (event: React.KeyboardEvent) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
+    event.stopPropagation()
+    if (keyCommitTimer.current) clearTimeout(keyCommitTimer.current)
+    if (!keyEditing.current) { keyEditing.current = true; onDragStart() }
     const step = event.shiftKey ? 1 : 1 / 60
     const from = handle === 'in' ? inSec : outSec
-    if (event.key === 'ArrowLeft') { event.preventDefault(); moveHandle(handle, from - step) }
-    if (event.key === 'ArrowRight') { event.preventDefault(); moveHandle(handle, from + step) }
+    moveHandle(handle, from + (event.key === 'ArrowRight' ? step : -step))
+  }
+
+  const finishKeys = () => {
+    if (keyCommitTimer.current) clearTimeout(keyCommitTimer.current)
+    keyCommitTimer.current = setTimeout(() => { keyCommitTimer.current = null; keyEditing.current = false; onDragEnd() }, 400)
+  }
+
+  const finishKeysOnBlur = () => {
+    if (!keyEditing.current) return
+    if (keyCommitTimer.current) clearTimeout(keyCommitTimer.current)
+    keyCommitTimer.current = null
+    keyEditing.current = false
+    onDragEnd()
   }
 
   const handleStyle = (seconds: number, side: Handle): React.CSSProperties => ({
@@ -141,6 +191,7 @@ export function Filmstrip({ filePath, durationSec, inSec, outSec, currentSec, ke
         style={{ height: 56, borderRadius: 6, overflow: 'visible' }}
         onPointerDown={event => {
           if ((event.target as HTMLElement).dataset.handle) return
+          setScrubbing(event.pointerId)
           onScrub(secondsAt(event.clientX))
         }}>
 
@@ -158,15 +209,30 @@ export function Filmstrip({ filePath, durationSec, inSec, outSec, currentSec, ke
         <div className="absolute pointer-events-none" style={{ top: 0, bottom: 0, left: 0, width: `${percent(inSec)}%`, background: 'color-mix(in srgb, var(--bg) 72%, transparent)', borderRadius: '6px 0 0 6px' }} />
         <div className="absolute pointer-events-none" style={{ top: 0, bottom: 0, right: 0, width: `${100 - percent(outSec)}%`, background: 'color-mix(in srgb, var(--bg) 72%, transparent)', borderRadius: '0 6px 6px 0' }} />
 
+        {marksSec.filter(at => Number.isFinite(at) && at >= 0 && at <= safeDuration).map((at, index) => (
+          <span key={`${at}-${index}`} className="absolute pointer-events-none" title={`Mark at ${at.toFixed(2)}s`}
+            style={{ top: 5, bottom: 5, left: `${percent(at)}%`, width: 1, background: 'var(--fg)', opacity: 0.65 }} />
+        ))}
+
         <div className="absolute pointer-events-none" style={{ top: 0, bottom: 0, left: `${percent(currentSec)}%`, width: 2, marginLeft: -1, background: 'var(--fg)', opacity: 0.9 }} />
 
         <button data-handle="in" aria-label="Trim start" tabIndex={0}
-          onPointerDown={event => { event.preventDefault(); setDragging('in') }}
+          onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); draggingRef.current = 'in'; onDragStart(); setDragging('in') }}
+          onPointerMove={event => { if (draggingRef.current === 'in') movePointerHandle('in', event) }}
+          onPointerUp={() => { if (draggingRef.current === 'in') { draggingRef.current = null; setDragging(null); onDragEnd() } }}
+          onPointerCancel={() => { if (draggingRef.current === 'in') { draggingRef.current = null; setDragging(null); onDragEnd() } }}
           onKeyDown={onHandleKey('in')}
+          onKeyUp={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.stopPropagation(); finishKeys() } }}
+          onBlur={finishKeysOnBlur}
           style={handleStyle(inSec, 'in')} />
         <button data-handle="out" aria-label="Trim end" tabIndex={0}
-          onPointerDown={event => { event.preventDefault(); setDragging('out') }}
+          onPointerDown={event => { event.preventDefault(); event.currentTarget.setPointerCapture(event.pointerId); draggingRef.current = 'out'; onDragStart(); setDragging('out') }}
+          onPointerMove={event => { if (draggingRef.current === 'out') movePointerHandle('out', event) }}
+          onPointerUp={() => { if (draggingRef.current === 'out') { draggingRef.current = null; setDragging(null); onDragEnd() } }}
+          onPointerCancel={() => { if (draggingRef.current === 'out') { draggingRef.current = null; setDragging(null); onDragEnd() } }}
           onKeyDown={onHandleKey('out')}
+          onKeyUp={event => { if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') { event.stopPropagation(); finishKeys() } }}
+          onBlur={finishKeysOnBlur}
           style={handleStyle(outSec, 'out')} />
       </div>
 

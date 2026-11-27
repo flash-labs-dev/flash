@@ -31,7 +31,7 @@ Some antivirus programs are also cautious about unsigned installers. The full so
 
 ## Install on Linux (experimental)
 
-The Linux build is an AppImage on the Releases page. It builds and passes its automated checks, but it has had very little testing on real hardware. It needs PipeWire and the XDG desktop portal for screen capture, so it should work on current Ubuntu, Fedora and similar distributions on Wayland or X11. If it breaks, that is useful to know: please send feedback and include your distribution and desktop.
+The Linux build is an AppImage on the Releases page. It builds and passes its automated checks, but it has had very little testing on real hardware. It records the screen through PipeWire and the XDG desktop portal, so use a Wayland session on a current distribution such as Ubuntu or Fedora. X11 sessions are not supported yet: Flash has no X11 capture of its own, so on X11 it can record only if your desktop's portal offers screen capture there, and that is untested. If it breaks, that is useful to know: please send feedback and include your distribution and desktop.
 
 ```bash
 chmod +x Flash-*.AppImage

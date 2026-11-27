@@ -3,7 +3,7 @@
 import { strict as assert } from 'node:assert'
 import {
   SHARE_MAX_BYTES, SHARE_PAGE_ORIGIN, SHARE_TARGET_KBPS, SHARE_UPLOAD_ENDPOINT, checkShareSize,
-  parseFlashLink, shareCopyMaxBytes, shareUrlFromPath,
+  decideSharePreparation, parseFlashLink, shareCopyMaxBytes, shareExportMaxBytes, shareUrlFromPath,
 } from './shareLink.ts'
 
 assert.equal(SHARE_UPLOAD_ENDPOINT, 'https://share.flashclipping.fyi/flash-clips')
@@ -24,6 +24,14 @@ for (const durationSeconds of [0, -1, Number.NaN, Number.POSITIVE_INFINITY]) {
   assert.equal(shareCopyMaxBytes({ durationSeconds, fileBytes: fifteenSecondsAt16Mbps }), null)
 }
 assert.equal(shareCopyMaxBytes({ durationSeconds: 0.1, fileBytes: 1048576 }), 1048576)
+assert.equal(shareExportMaxBytes({ durationSeconds: 15, fileBytes: 15 * 5500 * 1000 / 8, audioTrackCount: 1 }), null)
+assert.equal(shareExportMaxBytes({ durationSeconds: 15, fileBytes: 15 * 5500 * 1000 / 8, audioTrackCount: 5 }), SHARE_MAX_BYTES)
+assert.equal(shareExportMaxBytes({ durationSeconds: 15, fileBytes: fifteenSecondsAt16Mbps, audioTrackCount: 5 }),
+  Math.ceil(15 * SHARE_TARGET_KBPS * 1000 / 8))
+assert.equal(decideSharePreparation(5, SHARE_MAX_BYTES, true), 'export')
+assert.equal(decideSharePreparation(5, SHARE_MAX_BYTES, false), 'error')
+assert.equal(decideSharePreparation(5, null, true), 'error')
+assert.equal(decideSharePreparation(1, null, false), 'original')
 
 assert.equal(shareUrlFromPath('/c/AbC_-12345xY.mp4'), `${SHARE_PAGE_ORIGIN}/c/AbC_-12345xY`)
 // Anything off-shape is refused, so a hostile reply cannot steer the link.

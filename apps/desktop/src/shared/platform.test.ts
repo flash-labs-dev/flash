@@ -29,4 +29,8 @@ assert.equal(steamAppId('USER=a\0SteamAppId=1234\0', ''), '1234')
 assert.equal(steamAppId('STEAM_COMPAT_APP_ID=5678\0', ''), '5678')
 assert.equal(steamAppId('', '/steam/steamapps/compatdata/42/pfx/game.exe'), '42')
 assert.equal(steamAppId('SteamAppId=0\0', ''), '')
+// Proton helpers carry SteamAppId too; during launch they must not be taken for the game.
+for (const exe of ['wineboot.exe', 'winedevice.exe', 'services.exe', 'plugplay.exe', 'svchost.exe', 'rpcss.exe', 'explorer.exe', 'tabtip.exe', 'conhost.exe', 'python3', 'python3.11']) assert.equal(isLinuxInfrastructure(exe), true, exe)
+assert.equal(isLinuxInfrastructure('services'), false)
+assert.equal(linuxGameExecutable('wine64-preloader', 'wine64\0C:\\windows\\system32\\explorer.exe\0Z:\\games\\Game.exe\0'), 'Game.exe')
 console.log('platform adapters self-check passed')

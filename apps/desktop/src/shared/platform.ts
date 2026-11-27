@@ -32,7 +32,9 @@ export function autostartDesktopEntry(executable: string): string {
 }
 
 export const isLinuxInfrastructure = (exe: string): boolean =>
-  /^(?:wine(?:64)?(?:-preloader)?|wineserver|proton|steam|steamwebhelper|pressure-vessel.*|reaper|srt-bwrap)(?:\.exe)?$/i.test(exe)
+  /^(?:wine(?:64)?(?:-preloader)?|wineserver|proton|steam|steamwebhelper|pressure-vessel.*|reaper|srt-bwrap)(?:\.exe)?$/i.test(exe) ||
+  // Wine prefix helpers and the python3 that runs the Proton script inherit SteamAppId.
+  /^(?:(?:wineboot|winedevice|services|plugplay|svchost|rpcss|explorer|tabtip|conhost)\.exe|python3(?:\.\d+)?)$/i.test(exe)
 
 export function linuxGameExecutable(exe: string, cmdline: string): string {
   if (!/^wine(?:64)?(?:-preloader)?$/i.test(exe)) return exe

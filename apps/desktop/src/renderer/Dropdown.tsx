@@ -10,10 +10,12 @@ export type DropdownOption<T> = { value: T; label: string; hint?: string }
 // keeps the keyboard behaviour the native one gives away for free - arrows to
 // move, Enter to choose, Escape to cancel, Home and End to jump - because a
 // dropdown that only works with a mouse is worse than an ugly one.
-export function Dropdown<T extends string | number>({ value, options, onChange, title, width = 168, variant = 'plain' }: {
+export function Dropdown<T extends string | number>({ value, options, onChange, label, title, width = 168, variant = 'plain' }: {
   value: T
   options: DropdownOption<T>[]
   onChange: (value: T) => void
+  // The combobox's accessible name; its content is only the current value.
+  label: string
   title?: string
   width?: number
   // 'joined' butts against the button on its left, the pair reading as one control.
@@ -31,9 +33,16 @@ export function Dropdown<T extends string | number>({ value, options, onChange, 
   const rootRef = useRef<HTMLDivElement>(null)
   const selected = options.find(option => option.value === value) ?? options[0]
 
+  // On opening only: a parent rerender must not pull the highlight back.
+  useEffect(() => {
+    if (open) setActive(Math.max(0, options.findIndex(option => option.value === value)))
+  }, [open])
+
+  // A list that shrinks while open must not leave the highlight past its end.
+  useEffect(() => { setActive(i => Math.max(0, Math.min(i, options.length - 1))) }, [options.length])
+
   useEffect(() => {
     if (!open) return
-    setActive(Math.max(0, options.findIndex(option => option.value === value)))
     const onPointerDown = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node) && !menuRef.current?.contains(event.target as Node)) setOpen(false)
     }
@@ -48,7 +57,7 @@ export function Dropdown<T extends string | number>({ value, options, onChange, 
       window.removeEventListener('pointerdown', onPointerDown)
       window.removeEventListener('keydown', onKey, true)
     }
-  }, [open, options, value])
+  }, [open])
 
   // The settings scroller would clip an absolute popup, so place the menu
   // in the document and keep its bounds tied to the trigger.
@@ -111,6 +120,8 @@ export function Dropdown<T extends string | number>({ value, options, onChange, 
     <div ref={rootRef} onKeyDown={onButtonKey} onWheel={event => { if (open) event.stopPropagation() }} className="relative shrink-0" style={{ width }}>
       <button
         type="button"
+        role="combobox"
+        aria-label={label}
         title={title}
         aria-haspopup="listbox"
         aria-expanded={open}

@@ -29,6 +29,22 @@ export function shareCopyMaxBytes({ durationSeconds, fileBytes }: {
   return Math.max(SHARE_COPY_MIN_BYTES, Math.ceil(durationSeconds * SHARE_TARGET_KBPS * 1000 / 8))
 }
 
+export function shareExportMaxBytes({ durationSeconds, fileBytes, audioTrackCount }: {
+  durationSeconds: number
+  fileBytes: number
+  audioTrackCount: number
+}): number | null {
+  return shareCopyMaxBytes({ durationSeconds, fileBytes }) ??
+    (audioTrackCount > 1 ? SHARE_MAX_BYTES : null)
+}
+
+export function decideSharePreparation(audioTrackCount: number, maxBytes: number | null, canExport: boolean):
+  'original' | 'export' | 'error' {
+  if (!Number.isInteger(audioTrackCount) || audioTrackCount < 0) return 'error'
+  if (audioTrackCount > 1 && (!canExport || maxBytes === null)) return 'error'
+  return maxBytes !== null && canExport ? 'export' : 'original'
+}
+
 export function checkShareSize(bytes: number): string | null {
   if (!Number.isFinite(bytes) || bytes <= 0) return 'The clip is empty.'
   if (bytes > SHARE_MAX_BYTES) {

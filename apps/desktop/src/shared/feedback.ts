@@ -2,7 +2,7 @@
 // (which enables the Send button) and the main process (which refuses anything
 // that does not match before it leaves the machine).
 
-export const FEEDBACK_ENDPOINT = 'https://lubuntuserver.tail857ab5.ts.net:10000/flash-feedback'
+export const FEEDBACK_ENDPOINT = 'https://flashclipping.fyi/api/feedback'
 export const FEEDBACK_MIN_LENGTH = 3
 export const FEEDBACK_MAX_LENGTH = 2000
 

@@ -2,6 +2,7 @@
 //   node --experimental-strip-types src/shared/sanitise.test.ts
 import { strict as assert } from 'node:assert'
 import { sanitise, QUALITY_OPTIONS } from './sanitise.ts'
+import { DEFAULT_AUDIO_LANES, DEFAULT_AUDIO_TRACKS } from './audioLanes.ts'
 
 const defaults = {
   name: 'default-name',
@@ -67,8 +68,25 @@ assert.deepEqual(defaults, defaultsCopy)
 const settings = {
   quality: '1080p 60fps', bufferLength: 30, shortClipSeconds: 15,
   autoDeleteDays: 0, theme: 'blood', overlayPosition: 'top-left',
-  hotkey: 'F8', hotkeyShort: 'Shift+F8', screenshotHotkey: 'F9', perGame: {},
+  hotkey: 'F8', hotkeyShort: 'Shift+F8', screenshotHotkey: 'F9', markHotkey: '', perGame: {}, audioTracks: DEFAULT_AUDIO_TRACKS,
 }
+assert.deepEqual(sanitise(settings, {}), {})
+assert.deepEqual(sanitise(settings, { markHotkey: 'Ctrl+F10' }), { markHotkey: 'Ctrl+F10' })
+assert.deepEqual(sanitise({ ...settings, markHotkey: 'Ctrl+F10' }, { markHotkey: '' }), { markHotkey: '' })
+assert.deepEqual(sanitise(settings, { hotkey: '', hotkeyShort: '', screenshotHotkey: '' }),
+  { hotkey: '', hotkeyShort: '', screenshotHotkey: '' })
+assert.deepEqual(sanitise(settings, { audioTracks: { mic: false, game: 'off', extra: false } }).audioTracks,
+  { ...DEFAULT_AUDIO_TRACKS, mic: false })
+assert.deepEqual(sanitise({ ...settings, audioTracks: { ...DEFAULT_AUDIO_TRACKS, game: false, music: false } },
+  { audioTracks: { mic: false } }).audioTracks,
+  { ...DEFAULT_AUDIO_TRACKS, game: false, mic: false, music: false })
+assert.deepEqual(sanitise(settings, { audioTracks: null }), {})
+const lanesSettings = { ...settings, audioLanes: { discord: ['discord.exe'], music: ['spotify.exe'] } }
+assert.deepEqual(sanitise(lanesSettings, { audioLanes: { discord: ['teams.exe'] } }).audioLanes,
+  { discord: ['teams.exe'], music: ['spotify.exe'] })
+assert.deepEqual(sanitise({ ...lanesSettings, audioLanes: DEFAULT_AUDIO_LANES },
+  { audioLanes: { music: ['music.exe'] } }).audioLanes,
+  { discord: ['discord.exe'], music: ['music.exe'] })
 for (const quality of QUALITY_OPTIONS) assert.equal(sanitise(settings, { quality }).quality, quality)
 assert.deepEqual(sanitise(settings, { quality: '8K 999fps' }), {})
 for (const bufferLength of [10, 15, 300]) assert.equal(sanitise(settings, { bufferLength }).bufferLength, bufferLength)
@@ -80,8 +98,8 @@ for (const shortClipSeconds of [4, 31, NaN]) assert.deepEqual(sanitise(settings,
 assert.deepEqual(sanitise(settings, { bufferLength: 10, shortClipSeconds: 15 }), { bufferLength: 10 })
 assert.deepEqual(sanitise(settings, { bufferLength: 60, shortClipSeconds: 60 }), { bufferLength: 60, shortClipSeconds: 60 })
 assert.deepEqual(sanitise({ ...settings, bufferLength: 60 }, { shortClipSeconds: 45 }), { shortClipSeconds: 45 })
-for (const autoDeleteDays of [0, 7, 30, 90]) assert.equal(sanitise(settings, { autoDeleteDays }).autoDeleteDays, autoDeleteDays)
-for (const autoDeleteDays of [-1, 1, 365]) assert.deepEqual(sanitise(settings, { autoDeleteDays }), {})
+for (const autoDeleteDays of [0, 1, 7, 14, 30, 90, 365, 3650]) assert.equal(sanitise(settings, { autoDeleteDays }).autoDeleteDays, autoDeleteDays)
+for (const autoDeleteDays of [-1, 0.5, 3651, NaN, Infinity, '7']) assert.deepEqual(sanitise(settings, { autoDeleteDays }), {})
 for (const theme of ['blood', 'ultraviolet', 'cobalt', 'fuchsia', 'indigo', 'bone']) {
   assert.equal(sanitise(settings, { theme }).theme, theme)
 }
@@ -92,7 +110,8 @@ for (const overlayPosition of ['top-left', 'top-right', 'bottom-left', 'bottom-r
 assert.deepEqual(sanitise(settings, { overlayPosition: 'center' }), {})
 for (const key of ['hotkey', 'hotkeyShort', 'screenshotHotkey']) {
   assert.deepEqual(sanitise(settings, { [key]: 'Ctrl+F9' }), { [key]: 'Ctrl+F9' })
-  for (const value of ['', '  ', null]) assert.deepEqual(sanitise(settings, { [key]: value }), {})
+  for (const value of ['', '  ']) assert.deepEqual(sanitise(settings, { [key]: value }), { [key]: '' })
+  assert.deepEqual(sanitise(settings, { [key]: null }), {})
 }
 assert.deepEqual(sanitise(settings, { perGame: {
   good: { quality: '4K 60fps', bufferLength: 300, extra: true },

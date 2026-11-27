@@ -33,9 +33,11 @@ for (const file of readdirSync(shared).filter(name => name.endsWith('.test.ts'))
 
 console.log('Safe integration probes')
 for (const [file, args] of [
-  ['sidecars.js', []], ['preload-subscriptions.js', []], ['main-boundaries.js', []], ['deletion-retry.js', []],
+  ['sidecars.js', []], ['library-data.js', []], ['dialog-focus.js', []], ['library-shortcuts.js', []], ['preload-subscriptions.js', []], ['main-boundaries.js', []], ['lifecycle.js', []], ['tray-save.js', []], ['voice-commands.js', []], ['app-shell.js', []], ['window-recovery.js', []], ['recording-recovery.js', []], ['screenshot-thumbnails.js', []], ['thumbnail-cache.js', []],['deletion-retry.js', []],
   ['export-and-game.js', ['--safe']],
-  ['native-teardown.js', []],
+  ['native-teardown.js', []], ['update-game-settings.js', []], ['clips-folder-change.js', []], ['mic-picker.js', []],
+  ['editor-close.js', []],
+  ['editor-trim-save.js', []],
 ]) {
   if (!run(file, process.execPath, ['--experimental-strip-types', join(root, 'scripts/probes', file), ...args], root)) failed++
 }

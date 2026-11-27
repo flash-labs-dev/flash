@@ -68,6 +68,22 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
     second.release()
     third.release()
     console.log('PASS: existing and in-flight outputs reserve distinct names')
+    if (process.platform === 'linux') {
+      fs.writeFileSync(file('Case.mp4'), '')
+      fs.writeFileSync(file('case.png'), '')
+      fs.writeFileSync(file('Case.json'), JSON.stringify({ game: 'Upper' }))
+      migrateSidecars(dir)
+      assert.equal(readSidecar(file('Case.mp4')).game, 'Upper')
+      assert.equal(readSidecar(file('case.png')), null, 'case-variant media must not consume another legacy sidecar')
+      fs.mkdirSync(file('Game'))
+      fs.mkdirSync(file('game'))
+      const upper = reserveOutput(file('Game/round.mp4'))
+      const lower = reserveOutput(file('game/round.mp4'))
+      assert.equal(path.basename(lower.path), 'round.mp4', 'case-variant Linux folders have separate reservations')
+      upper.release()
+      lower.release()
+      console.log('PASS: Linux case-sensitive sidecar pairing and folder reservations')
+    }
   } finally {
     console.warn = warn
     fs.rmSync(dir, { recursive: true, force: true })

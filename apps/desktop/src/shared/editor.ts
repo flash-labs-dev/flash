@@ -1,7 +1,25 @@
-﻿// Pure maths for the clip editor. No DOM and no Electron, so it can be checked
+// Pure maths for the clip editor. No DOM and no Electron, so it can be checked
 // with `node --experimental-strip-types src/shared/editor.test.ts`.
 
 import { clipDisplayTitle } from './clipTitle.ts'
+
+export type TrimRange = { inSec: number; outSec: number }
+
+// Container and decoded media durations can differ slightly at the last frame.
+export function validTrimRange(value: unknown, durationSec: number): TrimRange | null {
+  if (!value || typeof value !== 'object' || !Number.isFinite(durationSec) || durationSec <= 0) return null
+  const { inSec, outSec } = value as Partial<TrimRange>
+  return typeof inSec === 'number' && typeof outSec === 'number' &&
+    Number.isFinite(inSec) && Number.isFinite(outSec) &&
+    inSec >= 0 && inSec < durationSec && outSec > inSec && outSec <= durationSec + 0.25
+    ? { inSec, outSec: Math.min(outSec, durationSec) } : null
+}
+
+export function estimatedCopyBytes(sourceBytes: number, durationSec: number, trim: TrimRange): number | null {
+  const range = validTrimRange(trim, durationSec)
+  if (!Number.isFinite(sourceBytes) || sourceBytes <= 0 || !range) return null
+  return Math.round(sourceBytes * (range.outSec - range.inSec) / durationSec)
+}
 
 
 export function matchesQuery(clip: { title: string; game: string }, query: string): boolean {
@@ -16,9 +34,11 @@ export function matchesQuery(clip: { title: string; game: string }, query: strin
 
 export function formatTimecode(seconds: number): string {
   const safe = Number.isFinite(seconds) && seconds > 0 ? seconds : 0
-  const minutes = Math.floor(safe / 60)
-  const rest = safe - minutes * 60
-  return `${minutes}:${Math.floor(rest).toString().padStart(2, '0')}.${Math.floor((rest % 1) * 10)}`
+  // Count whole tenths: (2.3 % 1) * 10 is 2.999..., which would show 0:02.2.
+  const tenths = Math.floor(safe * 10 + 1e-6)
+  const minutes = Math.floor(tenths / 600)
+  const whole = Math.floor((tenths % 600) / 10)
+  return `${minutes}:${whole.toString().padStart(2, '0')}.${tenths % 10}`
 }
 
 // Returns the keyframe within tolerance of `seconds`, or null. Drives both the
@@ -35,6 +55,16 @@ export function nearestKeyframe(keyframesSec: number[], seconds: number, toleran
     }
   }
   return best
+}
+
+// A quick tail cut keeps at least the requested length. Match the bracket
+// keys' snap window, but only accept keyframes before the requested start.
+export function keepLastRange(durationSec: number, keepSec: number, keyframesSec: number[], toleranceSec: number): TrimRange | null {
+  if (!Number.isFinite(durationSec) || !Number.isFinite(keepSec) ||
+      durationSec <= keepSec || keepSec <= 0) return null
+  const start = durationSec - keepSec
+  const snapped = nearestKeyframe(keyframesSec.filter(key => key >= 0 && key <= start), start, toleranceSec)
+  return { inSec: snapped ?? start, outSec: durationSec }
 }
 
 export type SaveReason = 'none' | 'trim' | 'audio' | 'video'

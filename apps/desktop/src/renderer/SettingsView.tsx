@@ -5,10 +5,10 @@ import { toAccelerator } from '../shared/accelerator'
 import { resolveGameSettings } from '../shared/perGame'
 import { countSyllables } from '../shared/syllables'
 import type { AutostartState } from '../preload/preload'
-import { assignApp, laneLabel } from '../shared/audioLanes'
-import { FEEDBACK_MAX_LENGTH, validateFeedback } from '../shared/feedback'
+import { assignApp, laneLabel, LANE_DISPLAY_ORDER, type AudioTracksSetting } from '../shared/audioLanes'
 import { Dropdown } from './Dropdown'
-import { Toggle, formatBytes } from './ui'
+import { ConfirmDialog, Toggle, formatBytes } from './ui'
+import { FeedbackDialog } from './FeedbackDialog'
 
 export interface Settings {
   clipsFolder: string
@@ -16,6 +16,7 @@ export interface Settings {
   hotkey: string
   hotkeyShort: string
   screenshotHotkey: string
+  markHotkey: string
   shortClipSeconds: number
   voiceEnabled: boolean
   voicePhrase: string
@@ -27,11 +28,13 @@ export interface Settings {
   quality: string
   bufferLength: number
   audioCapture: boolean
+  audioTracks: AudioTracksSetting
   audioLanes: { discord: string[]; music: string[] }
   micDeviceId: string
   autoSave: boolean
   notifications: boolean
   autoDeleteDays: number
+  maxStorageGB?: number
   perGame: Record<string, { quality?: string; bufferLength?: number }>
 }
 
@@ -49,6 +52,7 @@ export interface CaptureHealth {
   fps: number
   buffered: number
   audioMode?: string
+  audioError?: string
   error?: string
 }
 
@@ -132,10 +136,14 @@ function MicPicker({ value, onChange }: { value: string; onChange: (id: string) 
 
   useEffect(() => {
     let cancelled = false
-    window.flash.listMicDevices()
-      .then(result => { if (!cancelled) setDevices(result.devices) })
-      .catch(() => { if (!cancelled) setDevices([]) })
-    return () => { cancelled = true }
+    const load = () => {
+      window.flash.listMicDevices()
+        .then(result => { if (!cancelled) setDevices(result.devices) })
+        .catch(() => { if (!cancelled) setDevices([]) })
+    }
+    load()
+    navigator.mediaDevices?.addEventListener('devicechange', load)
+    return () => { cancelled = true; navigator.mediaDevices?.removeEventListener('devicechange', load) }
   }, [])
 
   if (!devices || devices.length === 0) return null
@@ -147,7 +155,7 @@ function MicPicker({ value, onChange }: { value: string; onChange: (id: string) 
   ]
   return (
     <Row label="Microphone" hint="Pick the mic you talk into. If it crackles, try another one.">
-      <Dropdown value={value} onChange={onChange} options={options} width={260} />
+      <Dropdown label="Microphone" value={value} onChange={onChange} options={options} width={260} />
     </Row>
   )
 }
@@ -155,9 +163,10 @@ function MicPicker({ value, onChange }: { value: string; onChange: (id: string) 
 // Which apps are recorded to the Discord and Music lanes. Lists what is making
 // sound now, then anything assigned that is not running, so an assignment can
 // be undone without starting the app.
-function AppAudio({ lanes, onChange }: {
+function AppAudio({ lanes, onChange, onSupported }: {
   lanes: { discord: string[]; music: string[] }
-  onChange: (next: { discord: string[]; music: string[] }) => void
+  onChange: (exe: string, lane: 'discord' | 'music' | 'other') => void
+  onSupported: (supported: boolean) => void
 }) {
   const [state, setState] = useState<{ supported: boolean; apps: AudioApp[] } | null>(null)
 
@@ -168,19 +177,19 @@ function AppAudio({ lanes, onChange }: {
     // process never has more than one request outstanding.
     const refresh = () => {
       window.flash.listAudioApps()
-        .then(result => { if (!cancelled) setState(result) })
+        .then(result => { if (!cancelled) { setState(result); onSupported(result.supported) } })
         .catch(() => {})
         .then(() => { if (!cancelled) timer = setTimeout(refresh, 2000) })
     }
     refresh()
     return () => { cancelled = true; clearTimeout(timer) }
-  }, [])
+  }, [onSupported])
 
   if (!state) return null
   if (!state.supported) {
     return (
       <Row label="App audio" hint={window.flash.platform === 'linux'
-        ? 'Per-app audio is not available on Linux yet. Desktop sound is recorded to Other apps.'
+        ? 'Per-app audio needs PipeWire on Linux. Desktop sound is recorded to Other apps.'
         : 'Per-app audio is not available on this version of Windows. Desktop sound is recorded to one track.'}>
         <span style={{ fontSize: 12, color: 'var(--muted-2)' }}>Not available</span>
       </Row>
@@ -215,8 +224,8 @@ function AppAudio({ lanes, onChange }: {
             </span>
             {app.lane === 'game'
               ? <span style={{ fontSize: 12, color: 'var(--muted-2)', width: 132 }}>{laneLabel('game')}</span>
-              : <Dropdown value={laneOf(app.exe)} options={choices} width={132} title={`Lane for ${app.name}`}
-                  onChange={lane => onChange(assignApp(lanes, app.exe, lane as 'discord' | 'music' | 'other'))} />}
+              : <Dropdown label={`Lane for ${app.name}`} value={laneOf(app.exe)} options={choices} width={132} title={`Lane for ${app.name}`}
+                  onChange={lane => onChange(app.exe, lane as 'discord' | 'music' | 'other')} />}
           </div>
         ))}
         {assignedOnly.map(entry => (
@@ -225,7 +234,7 @@ function AppAudio({ lanes, onChange }: {
               {entry.exe} <span style={{ color: 'var(--muted-3)' }}>· not running · {laneLabel(entry.lane)}</span>
             </span>
             <button type="button" className="btn btn-sm btn-ghost" aria-label={`Remove ${entry.exe}`}
-              onClick={() => onChange(assignApp(lanes, entry.exe, 'other'))}>
+              onClick={() => onChange(entry.exe, 'other')}>
               Remove
             </button>
           </div>
@@ -290,6 +299,11 @@ function HotkeyInput({ value, registered, onChange, label }: {
       e.preventDefault()
       e.stopPropagation()
       if (e.key === 'Escape') { setListening(false); return }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        onChange('')
+        setListening(false)
+        return
+      }
       const accelerator = toAccelerator(e)
       if (!accelerator) return   // keep listening through bare modifiers
       onChange(accelerator)
@@ -299,9 +313,10 @@ function HotkeyInput({ value, registered, onChange, label }: {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [listening, onChange])
 
-  const failed = !registered && !listening
+  const failed = !registered && !listening && Boolean(value)
   return (
-    <button type="button" onClick={() => setListening(l => !l)} aria-label={`${label}: ${value}. Click to change`}
+    <button type="button" onClick={() => setListening(l => !l)} aria-label={`${label}: ${value || 'Unset'}. Click to change`}
+      data-hotkey-listening={listening || undefined}
       title={failed ? 'Another program already owns this key. Pick a different one.' : 'Click, then press a key'}
       className="tabular transition-colors"
       style={{
@@ -310,86 +325,8 @@ function HotkeyInput({ value, registered, onChange, label }: {
         background: listening ? 'var(--glass)' : 'transparent',
         border: `1px solid ${listening ? 'var(--fg)' : failed ? 'var(--alert)' : 'var(--line)'}`,
       }}>
-      {listening ? 'Press a key…' : failed ? `${value} is taken` : value}
+      {listening ? 'Key or Delete…' : failed ? `${value} is taken` : value || 'Unset'}
     </button>
-  )
-}
-
-export function FeedbackDialog({ onClose, onSent }: { onClose: () => void; onSent?: () => void }) {
-  const [text, setText] = useState('')
-  const [sending, setSending] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-
-  const tooLong = text.length > FEEDBACK_MAX_LENGTH
-  const canSend = !sending && !tooLong && validateFeedback(text) === null
-
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return
-      event.preventDefault()
-      event.stopPropagation()
-      if (!sending) onClose()
-    }
-    // Capture phase: the feed also listens for Escape and would leave
-    // underneath the dialog otherwise.
-    window.addEventListener('keydown', onKey, true)
-    return () => window.removeEventListener('keydown', onKey, true)
-  }, [sending, onClose])
-
-  const send = async () => {
-    if (!canSend) return
-    setSending(true)
-    setError(null)
-    let result: { ok: boolean; error?: 'rate-limited' | 'failed' }
-    try { result = await window.flash.sendFeedback(text) }
-    catch { result = { ok: false, error: 'failed' } }
-    setSending(false)
-    if (result.ok) {
-      onSent?.()
-      onClose()
-      return
-    }
-    setError(result.error === 'rate-limited'
-      ? 'Too many messages, try again in an hour.'
-      : 'Could not send. Check your connection and try again.')
-  }
-
-  return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center"
-      style={{ background: 'rgba(4,4,6,0.72)', animation: 'overlay-in 0.12s ease-out' }}
-      onClick={onClose}>
-      <div role="dialog" aria-modal="true" aria-label="Send feedback"
-        onClick={event => event.stopPropagation()}
-        style={{
-          width: 460, padding: 28, background: 'var(--panel)', borderRadius: 10,
-          border: '1px solid var(--edge)', boxShadow: '0 24px 64px rgba(0,0,0,0.6)',
-          animation: 'dialog-in 0.16s var(--ease-out)',
-        }}>
-        <h2 className="display" style={{ fontSize: 30, color: 'var(--fg)', marginBottom: 16 }}>Send feedback</h2>
-        <textarea autoFocus value={text} disabled={sending} aria-label="Feedback message"
-          placeholder="What's broken, or what would make Flash better?"
-          onChange={event => setText(event.target.value)}
-          className="field w-full"
-          style={{ height: 'auto', minHeight: 120, padding: 12, lineHeight: 1.5, resize: 'vertical' }} />
-        <div className="flex justify-end" style={{ marginTop: 8 }}>
-          <span className="tabular" style={{ fontSize: 12, color: tooLong ? 'var(--alert)' : 'var(--muted-2)' }}>
-            {text.length} / {FEEDBACK_MAX_LENGTH}
-          </span>
-        </div>
-        <p style={{ fontSize: 12, color: 'var(--muted-2)', lineHeight: 1.5, marginTop: 4 }}>
-          Sends your message plus the Flash version and your OS. Nothing else.
-        </p>
-        {error && (
-          <p role="alert" style={{ fontSize: 12, color: 'var(--alert)', lineHeight: 1.6, marginTop: 12 }}>{error}</p>
-        )}
-        <div className="flex justify-end gap-2" style={{ marginTop: 24 }}>
-          <button type="button" onClick={onClose} className="btn">Cancel</button>
-          <button type="button" onClick={send} disabled={!canSend} className="btn btn-solid">
-            {sending ? 'Sending...' : 'Send'}
-          </button>
-        </div>
-      </div>
-    </div>
   )
 }
 
@@ -398,12 +335,12 @@ export function FeedbackDialog({ onClose, onSent }: { onClose: () => void; onSen
 export function SettingsView({ previewClip, settings, onChange, storage, encoder, captureBackend, voiceStatus, hotkeysRegistered, autostart, onToggleAutostart, displays, health, learnedGames, onForgetGame, onOpenFolder, onPickFolder }: {
   previewClip?: string
   settings: Settings
-  onChange: (partial: Partial<Settings>) => void
+  onChange: (partial: Partial<Settings> | ((current: Settings) => Partial<Settings>)) => void
   storage: { used: number; clips: number }
   encoder: string
   captureBackend: string
   voiceStatus: VoiceStatus
-  hotkeysRegistered: { clip: boolean; short: boolean; screenshot: boolean }
+  hotkeysRegistered: { clip: boolean; short: boolean; screenshot: boolean; mark: boolean }
   autostart: AutostartState
   onToggleAutostart: () => void
   displays: Display[]
@@ -424,6 +361,21 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
   const sectionNodes = useRef<Record<string, HTMLElement | null>>({})
   const [current, setCurrent] = useState<string>(SECTIONS[0])
   const [feedbackOpen, setFeedbackOpen] = useState(false)
+  const [pendingLimit, setPendingLimit] = useState(0)
+  const [pendingAutoDelete, setPendingAutoDelete] = useState<number | null>(null)
+  const [autoDeleteChoice, setAutoDeleteChoice] = useState<'custom' | null>(null)
+  const [customDays, setCustomDays] = useState(String(settings.autoDeleteDays || ''))
+  const [perAppSupported, setPerAppSupported] = useState<boolean | null>(null)
+
+  useEffect(() => { setCustomDays(String(settings.autoDeleteDays || '')) }, [settings.autoDeleteDays])
+
+  const applyAutoDelete = (days: number) => {
+    if (days === settings.autoDeleteDays) return
+    if (days > 0 && (!settings.autoDeleteDays || days < settings.autoDeleteDays)) setPendingAutoDelete(days)
+    else onChange({ autoDeleteDays: days })
+  }
+  const validCustomDays = /^\d+$/.test(customDays) && Number(customDays) >= 1 && Number(customDays) <= 3650
+  const isCustomAutoDelete = autoDeleteChoice === 'custom' || (autoDeleteChoice === null && ![0, 7, 30, 90].includes(settings.autoDeleteDays))
 
   // The index follows the reading position.
   useEffect(() => {
@@ -443,18 +395,20 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
     field: 'quality' | 'bufferLength',
     value: string | number | undefined,
   ) => {
-    const perGame = { ...settings.perGame }
-    const override = { ...perGame[game] }
-    if (field === 'quality') {
-      if (value === undefined) delete override.quality
-      else override.quality = String(value)
-    } else {
-      if (value === undefined) delete override.bufferLength
-      else override.bufferLength = Number(value)
-    }
-    if (Object.keys(override).length) perGame[game] = override
-    else delete perGame[game]
-    onChange({ perGame })
+    onChange(current => {
+      const perGame = { ...current.perGame }
+      const override = { ...perGame[game] }
+      if (field === 'quality') {
+        if (value === undefined) delete override.quality
+        else override.quality = String(value)
+      } else {
+        if (value === undefined) delete override.bufferLength
+        else override.bufferLength = Number(value)
+      }
+      if (Object.keys(override).length) perGame[game] = override
+      else delete perGame[game]
+      return { perGame }
+    })
   }
 
   const register = (id: string) => (node: HTMLElement | null) => { sectionNodes.current[id] = node }
@@ -523,6 +477,10 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
               <HotkeyInput label="Screenshot hotkey" value={settings.screenshotHotkey} registered={hotkeysRegistered.screenshot}
                 onChange={screenshotHotkey => onChange({ screenshotHotkey })} />
             </Row>
+            <Row label="Mark moment" hint="Places a bookmark in clips saved from the replay buffer. Optional; press Delete while setting the key to clear it.">
+              <HotkeyInput label="Mark moment" value={settings.markHotkey} registered={hotkeysRegistered.mark}
+                onChange={markHotkey => onChange({ markHotkey })} />
+            </Row>
             <Row label="Buffer length" hint="How far back a full clip reaches. Longer costs more memory.">
               <Range label="Buffer length" value={settings.bufferLength} min={10} max={300} step={5} suffix="s"
                 onChange={bufferLength => onChange({ bufferLength })} />
@@ -535,7 +493,7 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
             </Row>
             {displays.length > 1 && (
               <Row label="Capture display">
-                <Dropdown
+                <Dropdown label="Capture display"
                   value={settings.displayId}
                   onChange={displayId => onChange({ displayId })}
                   width={230}
@@ -552,7 +510,7 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
               hint={activeRefreshHz > 0 && qualityFps(settings.quality) > activeRefreshHz
                 ? <span style={{ color: 'var(--spark)' }}>Your display runs at {activeRefreshHz}Hz, so frames above that are duplicates.</span>
                 : undefined}>
-              <Dropdown
+              <Dropdown label="Quality"
                 value={settings.quality}
                 onChange={quality => onChange({ quality })}
                 options={QUALITY_OPTIONS.map(q => ({
@@ -563,14 +521,22 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
                 width={170}
               />
             </Row>
-            <Row label="Record audio" hint="Game, microphone, Discord, music and other apps, each on its own track.">
+            <Row label="Record audio" hint={perAppSupported === false
+              ? 'Desktop sound and microphone are recorded separately.'
+              : 'Game, microphone, Discord, music and other apps, each on its own track.'}>
               <Toggle label="Record audio" on={settings.audioCapture} onChange={() => onChange({ audioCapture: !settings.audioCapture })} />
             </Row>
+            {settings.audioCapture && LANE_DISPLAY_ORDER.filter(id => perAppSupported !== false || id === 'mic' || id === 'other').map(id => (
+              <Row key={id} label={laneLabel(id)}>
+                <Toggle label={`Record ${laneLabel(id)}`} on={settings.audioTracks[id]}
+                  onChange={() => onChange(current => ({ audioTracks: { ...current.audioTracks, [id]: !current.audioTracks[id] } }))} />
+              </Row>
+            ))}
             {settings.audioCapture && (
               <MicPicker value={settings.micDeviceId ?? ''} onChange={micDeviceId => onChange({ micDeviceId })} />
             )}
             {settings.audioCapture && (
-              <AppAudio lanes={settings.audioLanes} onChange={audioLanes => onChange({ audioLanes })} />
+              <AppAudio lanes={settings.audioLanes} onChange={(exe, lane) => onChange(current => ({ audioLanes: assignApp(current.audioLanes, exe, lane) }))} onSupported={setPerAppSupported} />
             )}
             {autostart.supported && (
               <Row label={window.flash.platform === 'win32' ? 'Start with Windows' : 'Start with your computer'}
@@ -592,9 +558,9 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
             </Row>
             {health && (
               <Row label="Capture health">
-                <Status tone={health.healthy ? 'ok' : 'bad'}>
+                <Status tone={health.healthy && !health.audioError ? 'ok' : health.healthy ? 'warn' : 'bad'}>
                   {health.healthy
-                    ? `${health.fps.toFixed(0)} fps · ${health.buffered.toFixed(0)}s buffered${health.audioMode ? ` · audio ${health.audioMode}` : ''}`
+                    ? health.audioError || `${health.fps.toFixed(0)} fps · ${health.buffered.toFixed(0)}s buffered${health.audioMode ? ` · audio ${health.audioMode}` : ''}`
                     : health.error || 'Capture stopped'}
                 </Status>
               </Row>
@@ -640,7 +606,7 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
             </p>
             {Object.keys(learnedGames).length === 0 ? (
               <p style={{ fontSize: 13, color: 'var(--muted-3)', paddingTop: 14 }}>
-                Nothing taught yet. Flash recognises {52} games on its own.
+                Nothing taught yet. Flash recognises {50} games on its own.
               </p>
             ) : (
               <div className="pt-2">
@@ -658,7 +624,7 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
                         </button>
                       </div>
                       <div className="flex flex-wrap items-center gap-3 pt-3">
-                        <Dropdown
+                        <Dropdown label={`Quality for ${name}`}
                           value={override.quality ?? ''}
                           onChange={quality => updateGameOverride(name, 'quality', quality || undefined)}
                           width={200}
@@ -667,7 +633,7 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
                             ...QUALITY_OPTIONS.map(quality => ({ value: quality, label: quality, hint: 'set' })),
                           ]}
                         />
-                        <Dropdown
+                        <Dropdown label={`Buffer length for ${name}`}
                           value={override.bufferLength ?? 0}
                           onChange={bufferLength => updateGameOverride(name, 'bufferLength', bufferLength || undefined)}
                           width={140}
@@ -695,7 +661,7 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
             </Row>
             {settings.overlay && (
               <Row label="Overlay corner">
-                <Dropdown
+                <Dropdown label="Overlay corner"
                   value={settings.overlayPosition}
                   onChange={overlayPosition => onChange({ overlayPosition: overlayPosition as Settings['overlayPosition'] })}
                   width={150}
@@ -714,7 +680,7 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
             <div className="flex items-end gap-4" style={{ padding: '20px 0 8px' }}>
               <span className="display" style={{ fontSize: 48, color: 'var(--fg)' }}>{formatBytes(storage.used)}</span>
               <span style={{ fontSize: 13, color: 'var(--muted)', paddingBottom: 6 }}>
-                across {storage.clips} clip{storage.clips === 1 ? '' : 's'} · MP4 / H.264
+                across {storage.clips} clips and screenshots · MP4 / PNG
               </span>
             </div>
             <Row label="Clips folder" hint={<span className="truncate block" style={{ maxWidth: 420 }} title={settings.clipsFolder}>{settings.clipsFolder}</span>}>
@@ -722,15 +688,55 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
               <button onClick={onPickFolder} className="btn btn-sm">Change</button>
             </Row>
             <Row label="Auto-delete clips after" hint={settings.autoDeleteDays > 0 ? 'Starred clips are always kept.' : undefined}>
-              <Dropdown
-                value={settings.autoDeleteDays}
-                onChange={autoDeleteDays => onChange({ autoDeleteDays })}
+              {isCustomAutoDelete && <form onSubmit={event => {
+                event.preventDefault()
+                if (validCustomDays) applyAutoDelete(Number(customDays))
+              }} className="flex items-center gap-3">
+                <input type="number" min={1} max={3650} step={1} required
+                  aria-label="Custom auto-delete age in days"
+                  value={customDays} onChange={event => setCustomDays(event.target.value)}
+                  className="field" style={{ width: 90 }} />
+                <button type="submit" className="btn btn-sm" disabled={!validCustomDays}>Apply</button>
+              </form>}
+              <Dropdown<number | 'custom'> label="Auto-delete clips after"
+                value={isCustomAutoDelete ? 'custom' : settings.autoDeleteDays}
+                onChange={value => {
+                  if (value === 'custom') {
+                    setCustomDays(String(settings.autoDeleteDays || ''))
+                    setAutoDeleteChoice('custom')
+                  } else {
+                    setAutoDeleteChoice(null)
+                    applyAutoDelete(value)
+                  }
+                }}
                 width={130}
                 options={[
                   { value: 0, label: 'Never' },
                   { value: 7, label: '7 days' },
                   { value: 30, label: '30 days' },
                   { value: 90, label: '90 days' },
+                  { value: 'custom', label: isCustomAutoDelete && settings.autoDeleteDays > 0 && ![7, 30, 90].includes(settings.autoDeleteDays) ? `Custom: ${settings.autoDeleteDays} day${settings.autoDeleteDays === 1 ? '' : 's'}` : 'Custom...' },
+                ]}
+              />
+            </Row>
+            <Row label="Keep clips and screenshots within" hint="Clips and screenshots count toward the limit, including starred ones. The three newest are always kept; older unstarred items may be permanently deleted.">
+              <Dropdown label="Keep clips and screenshots within"
+                value={settings.maxStorageGB ?? 0}
+                // Turning the limit on or lowering it deletes files at once.
+                onChange={maxStorageGB => {
+                  const current = settings.maxStorageGB ?? 0
+                  if (maxStorageGB && (!current || maxStorageGB < current)) setPendingLimit(maxStorageGB)
+                  else onChange({ maxStorageGB })
+                }}
+                width={130}
+                options={[
+                  { value: 0, label: 'No limit' },
+                  { value: 1, label: '1 GB' },
+                  { value: 5, label: '5 GB' },
+                  { value: 10, label: '10 GB' },
+                  { value: 25, label: '25 GB' },
+                  { value: 50, label: '50 GB' },
+                  { value: 100, label: '100 GB' },
                 ]}
               />
             </Row>
@@ -748,6 +754,20 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
         </div>
       </div>
       {feedbackOpen && <FeedbackDialog onClose={() => setFeedbackOpen(false)} />}
+      {pendingLimit > 0 && <ConfirmDialog onClose={() => setPendingLimit(0)} request={{
+        title: `Keep clips and screenshots within ${pendingLimit} GB?`,
+        body: 'Clips and screenshots count toward this limit, including starred ones. The three newest are always kept. Flash may permanently delete older unstarred items right away.',
+        confirmLabel: 'Set limit',
+        destructive: true,
+        onConfirm: () => onChange({ maxStorageGB: pendingLimit }),
+      }} />}
+      {pendingAutoDelete !== null && <ConfirmDialog onClose={() => setPendingAutoDelete(null)} request={{
+        title: `Auto-delete clips after ${pendingAutoDelete} day${pendingAutoDelete === 1 ? '' : 's'}?`,
+        body: 'Flash may permanently delete older unstarred clips right away. Starred clips are kept.',
+        confirmLabel: 'Set auto-delete age',
+        destructive: true,
+        onConfirm: () => onChange({ autoDeleteDays: pendingAutoDelete }),
+      }} />}
     </div>
   )
 }

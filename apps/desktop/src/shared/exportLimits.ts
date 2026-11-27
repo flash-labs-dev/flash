@@ -15,20 +15,20 @@ export interface ExportLimit {
 // label, so the size stays the thing you read first. "Compatible" is H.264:
 // it plays for a viewer whose PC cannot decode the newer codecs.
 export const EXPORT_LIMITS: ExportLimit[] = [
-  { value: '10', label: '10MB', hint: 'Discord free', bytes: 10 * 1048576, codec: 'auto' },
-  { value: '10-h264', label: '10MB compatible', hint: 'H.264, plays anywhere', bytes: 10 * 1048576, codec: 'h264' },
+  { value: '20', label: '20MB', hint: 'Discord free', bytes: 20 * 1048576, codec: 'auto' },
+  { value: '20-h264', label: '20MB compatible', hint: 'H.264, plays anywhere', bytes: 20 * 1048576, codec: 'h264' },
   { value: '50', label: '50MB', hint: 'Nitro Basic', bytes: 50 * 1048576, codec: 'auto' },
-  { value: '500', label: '500MB', hint: 'Nitro', bytes: 500 * 1048576, codec: 'auto' },
+  { value: '1024', label: '1GB', hint: 'Nitro', bytes: 1024 * 1048576, codec: 'auto' },
 ]
 
 // The default is the best codec the GPU can encode, on every platform.
-export const DEFAULT_EXPORT_LIMIT = '10'
+export const DEFAULT_EXPORT_LIMIT = '20'
 
 export const findExportLimit = (id: string): ExportLimit =>
   EXPORT_LIMITS.find(limit => limit.value === id) ?? EXPORT_LIMITS[0]
 
 export const exportSuffix = (bytes: number, codec: ExportCodecChoice): string =>
-  ` - ${Math.round(bytes / 1048576)}MB${codec === 'h264' ? ' H264' : ''}.mp4`
+  ` - ${bytes === 1024 * 1048576 ? '1GB' : `${Math.round(bytes / 1048576)}MB`}${codec === 'h264' ? ' H264' : ''}.mp4`
 
 // Says so when "auto" could not use AV1, so a worse-looking copy is explained.
 export function codecNote(requested: ExportCodecChoice, actual: string | undefined): string {

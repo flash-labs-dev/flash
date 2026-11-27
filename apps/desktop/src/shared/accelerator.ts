@@ -18,6 +18,11 @@ const PUNCTUATION: Record<string, string> = {
   Backslash: '\\', Semicolon: ';', Quote: "'", Comma: ',', Period: '.', Slash: '/',
 }
 
+const NUMPAD: Record<string, string> = {
+  NumpadAdd: 'numadd', NumpadSubtract: 'numsub', NumpadMultiply: 'nummult',
+  NumpadDivide: 'numdiv', NumpadDecimal: 'numdec',
+}
+
 export function toAccelerator(e: KeyLike): string | null {
   const code = e.code
   let key = ''
@@ -25,6 +30,7 @@ export function toAccelerator(e: KeyLike): string | null {
   else if (/^Digit\d$/.test(code)) key = code.slice(5)
   else if (/^F([1-9]|1\d|2[0-4])$/.test(code)) key = code
   else if (/^Numpad\d$/.test(code)) key = `num${code.slice(6)}`
+  else if (code in NUMPAD) key = NUMPAD[code]
   else if (NAMED.has(code)) key = code === 'ArrowUp' ? 'Up' : code === 'ArrowDown' ? 'Down'
     : code === 'ArrowLeft' ? 'Left' : code === 'ArrowRight' ? 'Right' : code
   else if (code in PUNCTUATION) key = PUNCTUATION[code]

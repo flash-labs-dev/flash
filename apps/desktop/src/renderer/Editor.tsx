@@ -6,10 +6,22 @@ import { Filmstrip, TRIM_SNAP_SEC } from './editor/Filmstrip'
 import { useLiveMix } from './editor/useLiveMix'
 import { useClipAudio } from './editor/useClipAudio'
 import type { LiveMixTrack } from './editor/useLiveMix'
-import { clampRange, clipUrl, deriveSaveMode, formatTimecode, nearestKeyframe } from '../shared/editor'
+import { clampRange, clipUrl, deriveSaveMode, estimatedCopyBytes, formatTimecode, keepLastRange, nearestKeyframe, validTrimRange } from '../shared/editor'
 import type { SaveReason } from '../shared/editor'
 import type { AudioTrackId } from '../shared/audioLanes'
 import type { ClipInfo } from '../preload/preload'
+import { createHistory, push, redo, undo } from '../shared/history'
+import { createScrubSeekScheduler } from '../shared/scrubSeek'
+import { loopPreviewTarget } from '../shared/loopPreview'
+import { audioEditsPending } from '../shared/unsavedAudio'
+
+type EditSnapshot = { trim: { inSec: number; outSec: number }; gains: Record<string, number> }
+
+function sameEdit(a: EditSnapshot, b: EditSnapshot): boolean {
+  return a.trim.inSec === b.trim.inSec && a.trim.outSec === b.trim.outSec &&
+    Object.keys(a.gains).length === Object.keys(b.gains).length &&
+    Object.keys(a.gains).every(id => a.gains[id] === b.gains[id])
+}
 
 const SPEEDS = [0.5, 1, 1.5, 2] as const
 
@@ -25,8 +37,11 @@ const SAVE_NOTES: Record<SaveReason, string> = {
 // looking like Chrome is the thing it is here to stop doing.
 export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () => void }) {
   const videoRef = useRef<HTMLVideoElement>(null)
+  const scrubSeekRef = useRef<ReturnType<typeof createScrubSeekScheduler> | null>(null)
   const [playing, setPlaying] = useState(false)
+  const [loopPreview, setLoopPreview] = useState(false)
   const [current, setCurrent] = useState(0)
+  const playheadRef = useRef(0)
   const [duration, setDuration] = useState(clip.durationSec || 0)
   const [speed, setSpeed] = useState<number>(1)
   const [range, setRange] = useState({ inSec: 0, outSec: clip.durationSec || 0 })
@@ -41,6 +56,70 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
   const { tracks: audioTracks, loading: audioLoading, error: audioError } = useClipAudio(clip.filePath)
   const [gains, setGains] = useState<Record<string, number>>({})
   const [mutedTracks, setMutedTracks] = useState<Set<string>>(new Set())
+  const snapshotRef = useRef<EditSnapshot>({ trim: range, gains: {} })
+  const historyRef = useRef(createHistory(snapshotRef.current))
+  const draggingEdit = useRef(false)
+  const trimWrite = useRef(Promise.resolve())
+  const trimWriteFailed = useRef(false)
+  const initialisedTrim = useRef(false)
+  const frameStepSec = useRef(1 / 60)
+  const lastFrameTime = useRef<number | null>(null)
+  const [mediaDuration, setMediaDuration] = useState(0)
+
+  const showSnapshot = useCallback((snapshot: EditSnapshot) => {
+    snapshotRef.current = snapshot
+    setRange(snapshot.trim)
+    setGains(snapshot.gains)
+  }, [])
+
+  const queueTrimWrite = useCallback((trim: EditSnapshot['trim']) => {
+    const length = videoRef.current?.duration || duration
+    trimWrite.current = trimWrite.current.then(async () => {
+      const result = await window.flash?.setClipTrim(clip.filePath, trim, length)
+      trimWriteFailed.current = !result || !!result.error
+      if (trimWriteFailed.current) setSaveNote(`Could not save trim: ${result?.error ?? 'Save failed'}`)
+    }).catch(() => { trimWriteFailed.current = true; setSaveNote('Could not save trim') })
+  }, [clip.filePath, duration])
+
+  const commit = useCallback(() => {
+    if (!sameEdit(historyRef.current.present, snapshotRef.current)) {
+      const before = historyRef.current.present.trim
+      const after = snapshotRef.current.trim
+      historyRef.current = push(historyRef.current, snapshotRef.current)
+      if (before.inSec !== after.inSec || before.outSec !== after.outSec) {
+        queueTrimWrite(after)
+      }
+    }
+  }, [queueTrimWrite])
+
+  const beginDrag = useCallback(() => { draggingEdit.current = true }, [])
+  const endDrag = useCallback(() => { draggingEdit.current = false; commit() }, [commit])
+
+  const closeEditor = useCallback(async () => {
+    if (saving) return
+    if (trimWriteFailed.current) { onClose(); return }
+    if (draggingEdit.current) endDrag()
+    await trimWrite.current
+    if (!trimWriteFailed.current) onClose()
+  }, [endDrag, onClose, saving])
+
+  const changeTrim = useCallback((trim: EditSnapshot['trim'], record = true) => {
+    showSnapshot({ ...snapshotRef.current, trim })
+    if (record && !draggingEdit.current) commit()
+  }, [showSnapshot, commit])
+
+  const changeGain = useCallback((id: string, gain: number) => {
+    showSnapshot({ ...snapshotRef.current, gains: { ...snapshotRef.current.gains, [id]: gain } })
+    if (!draggingEdit.current) commit()
+  }, [showSnapshot, commit])
+
+  const setInitialTrim = useCallback((length: number) => {
+    if (initialisedTrim.current || length <= 0 || historyRef.current.past.length || historyRef.current.future.length) return
+    initialisedTrim.current = true
+    const snapshot = { ...snapshotRef.current, trim: validTrimRange(clip.trim, length) ?? { inSec: 0, outSec: length } }
+    showSnapshot(snapshot)
+    historyRef.current = createHistory(snapshot)
+  }, [clip.trim, showSnapshot])
 
   // Keyframes come from a full pass over the file, so they arrive a moment
   // after the screen does. Until then the strip simply has no ticks and no
@@ -52,34 +131,62 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
       setKeyframes(result.keyframesSec ?? [])
       if (result.durationSeconds > 0) {
         setDuration(current => current > 0 ? current : result.durationSeconds)
-        setRange(current => current.outSec > 0 ? current : { inSec: 0, outSec: result.durationSeconds })
+        setInitialTrim(result.durationSeconds)
       }
     })
     return () => { cancelled = true }
-  }, [clip.filePath])
+  }, [clip.filePath, setInitialTrim])
 
   useEffect(() => {
-    setGains({})
+    const initial = { trim: { inSec: 0, outSec: clip.durationSec || 0 }, gains: {} }
+    showSnapshot(initial)
+    historyRef.current = createHistory(initial)
+    draggingEdit.current = false
+    initialisedTrim.current = false
+    playheadRef.current = 0
+    frameStepSec.current = 1 / 60
+    setMediaDuration(0)
+    setLoopPreview(false)
     setMutedTracks(new Set())
-  }, [clip.filePath])
-
-  useEffect(() => {
-    // Hiding the app releases decoded samples, not the user's mix edits.
-    // Reappearing tracks only need defaults for lanes we have not seen yet.
-    if (!audioTracks.length) return
-    setGains(current => ({ ...Object.fromEntries(audioTracks.map(track => [track.id, 1])), ...current }))
-  }, [audioTracks])
+  }, [clip.filePath, showSnapshot])
 
   const liveGains = useMemo(() => Object.fromEntries(
     audioTracks.map(track => [track.id, mutedTracks.has(track.id) ? 0 : (gains[track.id] ?? 1)]),
   ), [audioTracks, gains, mutedTracks])
   const { ready: mixReady } = useLiveMix(videoRef, audioTracks, liveGains)
 
-  const seekTo = useCallback((seconds: number) => {
+  useEffect(() => {
     const video = videoRef.current
-    if (video) video.currentTime = seconds
+    if (!video) return
+    const scheduler = createScrubSeekScheduler(video, requestAnimationFrame, cancelAnimationFrame)
+    scrubSeekRef.current = scheduler
+    return () => {
+      scrubSeekRef.current = null
+      scheduler.dispose()
+    }
+  }, [clip.filePath])
+
+  const seekTo = useCallback((seconds: number) => {
+    scrubSeekRef.current?.request(seconds)
+    playheadRef.current = seconds
     setCurrent(seconds)
   }, [])
+
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !video.requestVideoFrameCallback) return
+    let active = true
+    const observe: VideoFrameRequestCallback = (_now, frame) => {
+      if (!active) return
+      const previous = lastFrameTime.current
+      const difference = previous === null ? 0 : frame.mediaTime - previous
+      if (difference > 0.004 && difference < 0.1) frameStepSec.current = difference
+      lastFrameTime.current = frame.mediaTime
+      video.requestVideoFrameCallback(observe)
+    }
+    video.requestVideoFrameCallback(observe)
+    return () => { active = false; lastFrameTime.current = null }
+  }, [clip.filePath])
 
   // The in-point counts as on a keyframe only when it lands exactly on one.
   // The native planner carries a half-frame tolerance of its own; this is
@@ -87,7 +194,7 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
   // a re-encode.
   const saveMode = useMemo(
     () => deriveSaveMode(
-      keyframes.length === 0 || nearestKeyframe(keyframes, range.inSec, 0.001) !== null,
+      range.inSec === 0 || nearestKeyframe(keyframes, range.inSec, 0.001) !== null,
       Object.values(liveGains),
       saturation,
     ),
@@ -100,6 +207,8 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
       audioTracks.map(track => [track.id, liveGains[track.id] ?? 1]),
     ) as Partial<Record<AudioTrackId, number>>
     try {
+      await trimWrite.current
+      if (trimWriteFailed.current) { setSaveNote('Could not save trim. Move a trim handle to try again.'); return }
       const result = await window.flash?.saveClipEdit(clip.filePath, {
         startSeconds: range.inSec,
         endSeconds: range.outSec,
@@ -139,6 +248,7 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
       const context = canvas.getContext('2d')
       if (!context) throw new Error('Could not create screenshot canvas')
       const playheadSeconds = video.currentTime
+      context.filter = `saturate(${saturation}%)`
       context.drawImage(video, 0, 0, canvas.width, canvas.height)
       const blob = await new Promise<Blob | null>((resolve, reject) => {
         try { canvas.toBlob(resolve, 'image/png') }
@@ -154,7 +264,7 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
     } finally {
       setGrabbing(false)
     }
-  }, [clip.filePath])
+  }, [clip.filePath, saturation])
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current
@@ -163,35 +273,67 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
     else video.pause()
   }, [])
 
-  const setTrimEdge = useCallback((edge: 'in' | 'out', seconds: number) => {
-    const snapped = nearestKeyframe(keyframes, seconds, TRIM_SNAP_SEC) ?? seconds
-    setRange(current => edge === 'in'
+  const setTrimEdge = useCallback((edge: 'in' | 'out', seconds: number, snap = true) => {
+    const snapped = snap ? nearestKeyframe(keyframes, seconds, TRIM_SNAP_SEC) ?? seconds : seconds
+    const current = snapshotRef.current.trim
+    changeTrim(edge === 'in'
       ? clampRange(snapped, current.outSec, duration)
       : clampRange(current.inSec, snapped, duration))
-  }, [duration, keyframes])
+  }, [duration, keyframes, changeTrim])
 
-  // Escape closes, Space toggles play, and brackets set the trim edges. Left
-  // and right deliberately do nothing here: they move between clips in the
-  // player, and carrying that into the editor would let a stray keypress swap
-  // the clip out from under an in-progress edit.
+  // Keep the existing bracket and history shortcuts alongside editing keys.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
-      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return
+      const input = target instanceof HTMLInputElement ? target : null
+      if (target && ((input && input.type !== 'range') || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT' || target.isContentEditable || target.closest('[contenteditable="true"]'))) return
+      if ((event.ctrlKey || event.metaKey) && !event.altKey) {
+        const key = event.key.toLowerCase()
+        if (key === 'z' || key === 'y') {
+          event.preventDefault()
+          if (draggingEdit.current) endDrag()
+          const next = key === 'y' || event.shiftKey ? redo(historyRef.current) : undo(historyRef.current)
+          if (next !== historyRef.current) {
+            const previousTrim = historyRef.current.present.trim
+            historyRef.current = next
+            showSnapshot(next.present)
+            if (next.present.trim.inSec !== previousTrim.inSec || next.present.trim.outSec !== previousTrim.outSec) {
+              queueTrimWrite(next.present.trim)
+            }
+          }
+          return
+        }
+      }
+      if (input) return
+      if (event.ctrlKey || event.metaKey || event.altKey) return
       // Closing mid-save would unmount the editor while the native writer is
       // still producing the copy, leaving no visible result or error.
-      if (event.key === 'Escape' && !saving) onClose()
+      if (event.key === 'Escape' && !saving) void closeEditor()
       if (event.code === 'Space') { event.preventDefault(); togglePlay() }
-      if (event.key === '[' || event.key === ']') {
+      if (event.key.toLowerCase() === 'p' && !event.repeat) {
+        event.preventDefault()
+        setLoopPreview(value => !value)
+      }
+      if (event.key === '[' || event.key === ']' || ['i', 'o'].includes(event.key.toLowerCase())) {
         const video = videoRef.current
         if (!video) return
         event.preventDefault()
-        setTrimEdge(event.key === '[' ? 'in' : 'out', video.currentTime)
+        setTrimEdge(event.key === '[' || event.key.toLowerCase() === 'i' ? 'in' : 'out', video.currentTime,
+          event.key === '[' || event.key === ']')
       }
+      const key = event.key.toLowerCase()
+      if (key === 'arrowleft' || key === 'j' || key === 'arrowright') {
+        event.preventDefault()
+        videoRef.current?.pause()
+        seekTo(Math.min(duration, Math.max(0, (videoRef.current?.currentTime ?? playheadRef.current) +
+          (key === 'arrowright' ? 1 : -1) * frameStepSec.current)))
+      }
+      if (key === 'k') { event.preventDefault(); videoRef.current?.pause() }
+      if (key === 'l') { event.preventDefault(); videoRef.current?.play().catch(() => {}) }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [onClose, saving, setTrimEdge, togglePlay])
+  }, [closeEditor, saving, setTrimEdge, togglePlay, endDrag, showSnapshot, seekTo, duration, queueTrimWrite])
 
   useEffect(() => {
     const video = videoRef.current
@@ -202,7 +344,8 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col" style={{ background: 'var(--bg)' }}>
-      <ClipActionBar filePath={clip.filePath} onClose={onClose} backLabel="Back" middle={
+      <ClipActionBar filePath={clip.filePath} onClose={() => { void closeEditor() }} backLabel="Back"
+        unsavedAudio={audioEditsPending(audioTracks.map(track => track.id), liveGains)} middle={
         <span className="display truncate" style={{ fontSize: 24, color: 'var(--fg)' }}>{clipDisplayTitle(clip.title)}</span>
       } />
 
@@ -227,13 +370,32 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
             filter: saturation === 100 ? undefined : `saturate(${saturation}%)`,
           }}
           onLoadedMetadata={event => {
-            const length = event.currentTarget.duration || clip.durationSec || 0
+            const actual = event.currentTarget.duration
+            const length = Number.isFinite(actual) && actual > 0 ? actual : clip.durationSec || 0
             setDuration(length)
-            setRange(current => current.outSec > 0 ? current : { inSec: 0, outSec: length })
+            setMediaDuration(Number.isFinite(actual) && actual > 0 ? actual : 0)
+            setInitialTrim(length)
           }}
-          onTimeUpdate={event => setCurrent(event.currentTarget.currentTime)}
-          onPlay={() => setPlaying(true)}
+          onTimeUpdate={event => {
+            const video = event.currentTarget
+            const target = loopPreviewTarget(video.currentTime, range, loopPreview, !video.paused)
+            if (target !== null) video.currentTime = target
+            playheadRef.current = target ?? video.currentTime
+            setCurrent(playheadRef.current)
+          }}
+          onPlay={event => {
+            const video = event.currentTarget
+            if (loopPreview && (video.currentTime < range.inSec || video.currentTime >= range.outSec)) {
+              video.currentTime = range.inSec
+            }
+            setPlaying(true)
+          }}
           onPause={() => setPlaying(false)}
+          onEnded={event => {
+            if (!loopPreview || !(range.outSec > range.inSec)) return
+            event.currentTarget.currentTime = range.inSec
+            void event.currentTarget.play().catch(() => {})
+          }}
           onClick={togglePlay}
         />
         </div>
@@ -285,7 +447,9 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
           tracks={audioTracks}
           gains={gains}
           muted={mutedTracks}
-          onGainChange={(id, gain) => setGains(current => ({ ...current, [id]: gain }))}
+          onGainChange={changeGain}
+          onGainDragStart={beginDrag}
+          onGainDragEnd={endDrag}
           onMuteToggle={id => setMutedTracks(current => {
             const next = new Set(current)
             if (next.has(id)) next.delete(id)
@@ -305,7 +469,10 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
           outSec={range.outSec}
           currentSec={current}
           keyframesSec={keyframes}
-          onChange={next => setRange(clampRange(next.inSec, next.outSec, duration))}
+          marksSec={clip.marksSec}
+          onChange={next => changeTrim(clampRange(next.inSec, next.outSec, duration))}
+          onDragStart={beginDrag}
+          onDragEnd={endDrag}
           onScrub={seekTo}
         />
 
@@ -318,6 +485,17 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
             {playing
               ? <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><rect x="2" y="1" width="3.5" height="12" rx="1"/><rect x="8.5" y="1" width="3.5" height="12" rx="1"/></svg>
               : <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M3 1.8v10.4c0 .7.8 1.1 1.4.7l8-5.2a.85.85 0 000-1.4l-8-5.2c-.6-.4-1.4 0-1.4.7z"/></svg>}
+          </button>
+
+          <button onClick={() => setLoopPreview(value => !value)}
+            aria-label="Loop trim preview" aria-pressed={loopPreview} title="Loop trim preview (P)"
+            className="w-8 h-8 flex items-center justify-center rounded-md transition-all hover:bg-white/5"
+            style={{ color: loopPreview ? 'var(--accent)' : 'var(--fg)' }}>
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M13 6V4.5A2.5 2.5 0 0010.5 2h-6A2.5 2.5 0 002 4.5V6" />
+              <path d="m11 4 2 2 2-2M3 10v1.5A2.5 2.5 0 005.5 14h6a2.5 2.5 0 002.5-2.5V10" />
+              <path d="m5 12-2-2-2 2" />
+            </svg>
           </button>
 
           <span style={{ fontSize: 12, color: 'var(--muted-2)', fontVariantNumeric: 'tabular-nums' }}>
@@ -343,18 +521,32 @@ export default function Editor({ clip, onClose }: { clip: ClipInfo; onClose: () 
         <span className="display" style={{ fontSize: 26, color: 'var(--fg)' }}>
           {(range.outSec - range.inSec).toFixed(1)}s
         </span>
+        <span className="flex shrink-0 items-center gap-2">
+          {[15, 30].map(seconds => duration > seconds && (
+            <button key={seconds} className="btn btn-sm shrink-0" onClick={() => {
+              const trim = keepLastRange(duration, seconds, keyframes, TRIM_SNAP_SEC)
+              if (trim) changeTrim(trim)
+            }}>
+              Keep last {seconds}s
+            </button>
+          ))}
+        </span>
+        {saveMode.lossless && keyframes.length > 0 && estimatedCopyBytes(clip.size, mediaDuration, range) !== null &&
+          <span className="tabular hidden min-[1100px]:inline" style={{ fontSize: 12, color: 'var(--muted)' }}>
+            ~{(estimatedCopyBytes(clip.size, mediaDuration, range)! / (1024 * 1024)).toFixed(1)} MB approx.
+          </span>}
         <span className="tabular" style={{ fontSize: 12, color: 'var(--muted)' }}>
           {formatTimecode(range.inSec)} → {formatTimecode(range.outSec)}
         </span>
-        <span className="flex items-center gap-2" style={{ fontSize: 12, color: 'var(--muted-3)' }}>
+        <span className="hidden min-[1100px]:flex items-center gap-2" style={{ fontSize: 12, color: 'var(--muted-3)' }}>
           <span className="keycap">[</span> in <span className="keycap">]</span> out
         </span>
         {/* Honest about what the save will cost, and specific about which
             change caused it, rather than just going dark. */}
-        <span style={{ fontSize: 12, color: saveMode.lossless ? 'var(--fg)' : 'var(--muted-3)' }}>
+        <span className="hidden min-[1100px]:inline" style={{ fontSize: 12, color: saveMode.lossless ? 'var(--fg)' : 'var(--muted-3)' }}>
           {SAVE_NOTES[saveMode.reason]}
         </span>
-        {saveNote && <span role="status" style={{ fontSize: 12, color: 'var(--muted)' }}>{saveNote}</span>}
+        {saveNote && <span role="status" className="min-w-0 truncate" title={saveNote} style={{ fontSize: 12, color: 'var(--muted)' }}>{saveNote}</span>}
         <span className="ml-auto flex items-center gap-2">
           {clip.kind !== 'shot' && (
             <button disabled={grabbing} onClick={grabFrame} className="btn shrink-0">

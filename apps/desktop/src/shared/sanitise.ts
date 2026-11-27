@@ -1,5 +1,5 @@
 import { THEMES } from './themes.ts'
-import { sanitiseAudioLanes } from './audioLanes.ts'
+import { sanitiseAudioLanes, sanitiseAudioTracks } from './audioLanes.ts'
 
 export const QUALITY_OPTIONS = [
   '720p 30fps', '720p 60fps',
@@ -35,8 +35,13 @@ export function sanitise<T extends Record<string, unknown>>(defaults: T, parsed:
       continue
     }
     if (key === 'audioLanes') {
-      const lanes = sanitiseAudioLanes(value)
+      const lanes = sanitiseAudioLanes(value, fallback as import('./audioLanes.ts').AudioLanesSetting)
       if (lanes) clean[key] = lanes
+      continue
+    }
+    if (key === 'audioTracks') {
+      const tracks = sanitiseAudioTracks(value, fallback as import('./audioLanes.ts').AudioTracksSetting)
+      if (tracks) clean[key] = tracks
       continue
     }
     if (key === 'ignoredGames') {
@@ -66,11 +71,14 @@ export function sanitise<T extends Record<string, unknown>>(defaults: T, parsed:
 
     if (key === 'quality' && !QUALITY_OPTIONS.includes(value as string)) continue
     if (key === 'bufferLength' && (typeof value !== 'number' || value < 10 || value > 300 || value % 5 !== 0)) continue
-    if (key === 'autoDeleteDays' && ![0, 7, 30, 90].includes(value as number)) continue
+    if (key === 'autoDeleteDays' && (!Number.isInteger(value) || (value as number) < 0 || (value as number) > 3650)) continue
+    if (key === 'maxStorageGB' && ![0, 1, 5, 10, 25, 50, 100].includes(value as number)) continue
     if (key === 'theme' && !Object.hasOwn(THEMES, value as string)) continue
     if (key === 'overlayPosition' && !['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(value as string)) continue
-    if (['hotkey', 'hotkeyShort', 'screenshotHotkey'].includes(key) && !(value as string).trim()) continue
-
+    if (['hotkey', 'hotkeyShort', 'screenshotHotkey', 'markHotkey'].includes(key) && !(value as string).trim()) {
+      clean[key] = ''
+      continue
+    }
     clean[key] = value
   }
 

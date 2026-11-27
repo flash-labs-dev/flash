@@ -197,7 +197,7 @@ html, body {
 }
 .btn:hover:not(:disabled) { background: var(--glass); border-color: var(--line-strong); }
 .btn:active:not(:disabled) { background: var(--fg); color: var(--bg); border-color: var(--fg); }
-.btn:disabled { opacity: 0.45; cursor: default; }
+.btn:disabled, .btn[aria-disabled='true'] { opacity: 0.45; cursor: default; }
 
 /* The one filled button on a screen: the thing you came to do. */
 .btn-solid { background: var(--fg); color: var(--bg); border-color: var(--fg); }
@@ -358,6 +358,8 @@ html, body {
   position: relative;
   aspect-ratio: 16 / 9;
   overflow: hidden;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 160px;
   background: var(--panel);
   cursor: pointer;
   outline: none;
@@ -519,6 +521,13 @@ html, body {
 /* Electron title bar drag region */
 .titlebar-drag { -webkit-app-region: drag; }
 .titlebar-no-drag { -webkit-app-region: no-drag; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
 
 /* Tile stills fade in the one time they are first made; afterwards they are
    cached and present on the first frame, so the fade never repeats. The live

@@ -11,14 +11,16 @@ for (const limit of EXPORT_LIMITS) assert.equal(findExportLimit(limit.value), li
 assert.equal(findExportLimit('nope'), EXPORT_LIMITS[0])
 assert.equal(findExportLimit(String(10 * 1048576)), EXPORT_LIMITS[0])
 
-// Every platform defaults to the best codec the GPU can encode, at 10MB.
+// Current Discord attachment tiers: 20MB free, 50MB Basic, 1GB Nitro.
 assert.equal(findExportLimit(DEFAULT_EXPORT_LIMIT).codec, 'auto')
-assert.equal(findExportLimit(DEFAULT_EXPORT_LIMIT).bytes, 10 * 1048576)
+assert.equal(findExportLimit(DEFAULT_EXPORT_LIMIT).bytes, 20 * 1048576)
+assert.equal(EXPORT_LIMITS.find(limit => limit.hint === 'Discord free')?.bytes, 20 * 1048576)
+assert.equal(EXPORT_LIMITS.find(limit => limit.hint === 'Nitro')?.bytes, 1024 * 1048576)
 
-// The two 10MB copies of one clip get different names.
-assert.equal(exportSuffix(10 * 1048576, 'auto'), ' - 10MB.mp4')
-assert.equal(exportSuffix(10 * 1048576, 'h264'), ' - 10MB H264.mp4')
-assert.equal(exportSuffix(500 * 1048576, 'auto'), ' - 500MB.mp4')
+// The two 20MB copies of one clip get different names.
+assert.equal(exportSuffix(20 * 1048576, 'auto'), ' - 20MB.mp4')
+assert.equal(exportSuffix(20 * 1048576, 'h264'), ' - 20MB H264.mp4')
+assert.equal(exportSuffix(1024 * 1048576, 'auto'), ' - 1GB.mp4')
 
 // The note only speaks up when Auto did not get AV1.
 assert.equal(codecNote('auto', 'av1'), '')
