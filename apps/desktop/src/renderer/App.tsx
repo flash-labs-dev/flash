@@ -7,12 +7,12 @@ import type { AutostartState } from '../preload/preload'
 import { clearSelection, selectRange, toggleSelection } from '../shared/selection'
 import { SelectionBar } from './SelectionBar'
 import Editor from './Editor'
-import { FeedView } from './FeedView'
+import { FeedView } from './ClipViewer'
 import { LibraryView, sortClips, type SortOrder } from './LibraryView'
 import { SettingsView, FeedbackDialog, type CaptureHealth, type Display, type Settings, type VoiceStatus } from './SettingsView'
 import { SharedClipView, type SharedClipLink } from './SharedClipView'
 import {
-  type Clip, type ConfirmRequest, ConfirmDialog, BoltLogo, Icon, formatBytes,
+  type Clip, type ConfirmRequest, ConfirmDialog, BoltLogo, GameMark, Icon, formatBytes,
 } from './ui'
 
 /* THESIS: one clip owns the window and the next is one flick away; Flash
@@ -38,28 +38,18 @@ type View = 'Feed' | 'Library' | 'Settings' | 'Shared'
 // buttons on top of whatever the app puts in its own top-right corner.
 function WindowControls() {
   const Button = ({ label, onClick, path, danger }: { label: string; onClick: () => void; path: string; danger?: boolean }) => (
-    <button aria-label={label} title={label} onClick={onClick}
-      className="w-12 h-full flex items-center justify-center transition-colors"
-      style={{ color: 'var(--muted)' }}
-      onMouseEnter={e => {
-        e.currentTarget.style.background = danger ? 'var(--alert)' : 'var(--glass)'
-        e.currentTarget.style.color = danger ? 'white' : 'var(--fg)'
-      }}
-      onMouseLeave={e => {
-        e.currentTarget.style.background = 'transparent'
-        e.currentTarget.style.color = 'var(--muted)'
-      }}>
-      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.1" aria-hidden="true">
+    <button aria-label={label} title={label} onClick={onClick} className={`win-btn${danger ? ' win-btn-close' : ''}`}>
+      <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" aria-hidden="true">
         <path d={path} />
       </svg>
     </button>
   )
 
   return (
-    <div className="flex items-stretch self-stretch titlebar-no-drag">
+    <div className="flex items-center gap-1 titlebar-no-drag" style={{ paddingRight: 10 }}>
       <Button label="Minimize" onClick={() => window.flash?.minimize()} path="M0 5h10" />
-      <Button label="Maximize" onClick={() => window.flash?.maximize()} path="M0.5 0.5h9v9h-9z" />
-      <Button label="Close to tray" onClick={() => window.flash?.close()} path="M0.5 0.5l9 9M9.5 0.5l-9 9" danger />
+      <Button label="Maximize" onClick={() => window.flash?.maximize()} path="M1 1h8v8h-8z" />
+      <Button label="Close to tray" onClick={() => window.flash?.close()} path="M1 1l8 8M9 1l-8 8" danger />
     </div>
   )
 }
@@ -84,9 +74,8 @@ function IconButton({ label, icon, onClick, disabled }: { label: string; icon: R
   )
 }
 
-function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailable, hotkey, hotkeyShort, saveState, onSearch, onFeedback }: {
+function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailable, hotkey, hotkeyShort, saveState, onFeedback }: {
   onFeedback: () => void
-  onSearch: () => void
   isRecording: boolean
   onToggleRecording: () => void
   detectedGame: string | null
@@ -113,7 +102,7 @@ function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailab
           color: live ? 'var(--fg)' : 'var(--text-secondary)', background: 'var(--field)', border: '1px solid var(--edge)',
           cursor: captureAvailable ? 'pointer' : 'default',
         }}>
-        {live ? <>Buffering{detectedGame && <span style={{ color: 'var(--muted)' }}>{detectedGame}</span>}</> : 'Not recording'}
+        {live ? <>{detectedGame && <GameMark game={detectedGame} size={18} />}Buffering{detectedGame && <span style={{ color: 'var(--muted)' }}>{detectedGame}</span>}</> : 'Not recording'}
       </button>
 
       <div className="flex items-center gap-4" style={{ fontSize: 13, color: 'var(--muted)' }}>
@@ -131,7 +120,6 @@ function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailab
         )}
         <button onClick={onFeedback} className="titlebar-no-drag" style={{ fontSize: 13, color: 'var(--text-faint)', padding: '0 10px', height: 40, cursor: 'pointer' }}
           title="Tell us what's broken or what you want. We read every message.">Feedback</button>
-        <IconButton label="Search clips" icon="search" onClick={onSearch} />
         {/* TODO: notifications and accounts have no backend yet. */}
         <IconButton label="Notifications" icon="bell" disabled />
         <IconButton label="Account" icon="user" disabled />
@@ -571,11 +559,6 @@ export default function App() {
         detectedGame={detectedGame} captureAvailable={captureAvailable}
         hotkey={settings.hotkey} hotkeyShort={settings.hotkeyShort} saveState={saveState}
         onFeedback={() => setFeedbackOpen(true)}
-        onSearch={() => {
-          setSharedClip(null); setView('Library')
-          // The Library focuses its search box on "/" once it is showing.
-          requestAnimationFrame(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: '/' })))
-        }}
       />
       <Sidebar
         storage={storage}
