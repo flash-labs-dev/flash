@@ -38,6 +38,7 @@ pub fn defaults(videos_dir: &Path) -> Map<String, Value> {
         "micDeviceId": "",
         "autoSave": true,
         "notifications": true,
+        "discordPresence": true,
         "autoDeleteDays": 0,
         "autostartMarkerConsumedAt": 0,
         "learnedGames": {},
@@ -138,7 +139,8 @@ pub fn sanitise(defaults: &Map<String, Value>, parsed: &Value) -> Map<String, Va
             "theme" => THEMES.contains(&text),
             "overlayPosition" => OVERLAY_POSITIONS.contains(&text),
             "captureMode" => ["game", "screen"].contains(&text),
-            "hotkey" | "hotkeyShort" | "screenshotHotkey" => !text.trim().is_empty(),
+            // Empty means unbound (cleared in Settings).
+            "hotkey" | "hotkeyShort" | "screenshotHotkey" => { clean.insert(key.clone(), json!(text.trim())); continue }
             _ => true,
         };
         if ok { clean.insert(key.clone(), value.clone()); }
@@ -221,7 +223,7 @@ mod tests {
         for bad in [json!(7), json!(5), json!(305), json!(12.5)] { assert!(sanitise(&d(), &json!({ "bufferLength": bad })).is_empty()); }
         assert_eq!(sanitise(&d(), &json!({ "bufferLength": 60 }))["bufferLength"], 60);
         assert!(sanitise(&d(), &json!({ "autoDeleteDays": 3 })).is_empty());
-        assert!(sanitise(&d(), &json!({ "hotkey": "   " })).is_empty());
+        assert_eq!(sanitise(&d(), &json!({ "hotkey": "   " }))["hotkey"], "", "cleared means unbound");
         assert!(sanitise(&d(), &json!({ "theme": "neon" })).is_empty());
     }
 

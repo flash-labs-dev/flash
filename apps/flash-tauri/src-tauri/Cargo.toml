@@ -1,6 +1,6 @@
 [package]
 name = "flash"
-version = "0.2.0-alpha.0"
+version = "0.2.0"
 edition = "2021"
 license = "MIT"
 description = "Flash game clipper: Rust + Tauri build"

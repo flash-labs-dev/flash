@@ -7,6 +7,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod detect;
+mod discord;
 #[cfg(target_os = "linux")]
 mod engine;
 mod hotkeys;
@@ -472,6 +473,7 @@ fn main() {
             let handle = app.handle().clone();
             std::thread::spawn(move || {
                 let mut detector = detect::Detector::new();
+                let mut presence = discord::Presence::new();
                 loop {
                     let app = handle.state::<App>();
                     let learned = app.get("learnedGames").as_object().cloned().unwrap_or_default();
@@ -482,6 +484,8 @@ fn main() {
                         if app.get("captureMode") == "game" { engine::set_capture_window(found.as_ref().map_or(0, |g| g.pid)) }
                         detector.current = found;
                     }
+                    let show = app.get("discordPresence") != json!(false);
+                    presence.update(detector.current.as_ref().filter(|_| show).map(|g| g.name.as_str()));
                     std::thread::sleep(Duration::from_secs(3));
                 }
             });
