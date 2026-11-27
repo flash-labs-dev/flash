@@ -10,7 +10,9 @@ mod detect;
 #[cfg(target_os = "linux")]
 mod engine;
 mod hotkeys;
+mod icons;
 mod library;
+mod media;
 mod settings;
 
 use serde_json::{json, Value};
@@ -35,6 +37,8 @@ struct App {
     hotkey_keys: watch::Sender<[String; 3]>,
     cache: PathBuf,
     toasts: AtomicU64,
+    // Base URL of media.rs's loopback server; the UI puts clip paths after it.
+    clip_base: Mutex<String>,
     // One engine start at a time (launch, tray, UI and settings can all ask).
     starting: Mutex<()>,
     // Like Electron's isRecording: on once start succeeds. The engine's own flag
@@ -160,7 +164,8 @@ fn show_toast(handle: &AppHandle, duration: f64, game: &str) {
     let url = format!("toast.html?duration={}&game={}&position={}", duration.round(), encode(game), encode(&corner));
     let (width, height, pad) = (280.0, 64.0, 16.0);
     let mut builder = WebviewWindowBuilder::new(handle, &label, WebviewUrl::App(url.into()))
-        .title("Flash").inner_size(width, height).decorations(false).transparent(true).shadow(false)
+        // The KWin script (place_toasts) finds the toast by this title and puts it in the corner.
+        .title(format!("Flash toast {corner}")).inner_size(width, height).decorations(false).transparent(true).shadow(false)
         .always_on_top(true).skip_taskbar(true).focused(false).resizable(false);
     if let Ok(Some(monitor)) = handle.primary_monitor() {
         let scale = monitor.scale_factor();
@@ -169,7 +174,7 @@ fn show_toast(handle: &AppHandle, duration: f64, game: &str) {
         let (aw, ah) = (area.size.width as f64 / scale, area.size.height as f64 / scale);
         let x = if corner.ends_with("right") { ax + aw - width - pad } else { ax + pad };
         let y = if corner.starts_with("bottom") { ay + ah - height - pad } else { ay + pad };
-        // shortcut: Wayland ignores client positions, so KWin centres the toast; anchoring it needs gtk-layer-shell.
+        // Honoured on X11; on Wayland the KWin script places it, elsewhere the compositor decides.
         builder = builder.position(x, y);
     }
     let Ok(window) = builder.build() else { return };
@@ -183,41 +188,34 @@ fn show_toast(handle: &AppHandle, duration: f64, game: &str) {
     });
 }
 
-/// flash-clip://local/<path>: clips for <video> and <img>, with byte ranges so
-/// seeking works. Nothing outside the clips folder.
-fn serve(handle: &AppHandle, request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
-    use tauri::http::{header, Response, StatusCode};
-    let respond = |status: StatusCode| Response::builder().status(status).body(Vec::new()).unwrap();
-    let path = decode(request.uri().path());
-    let file = Path::new(&path);
-    let kind = match file.extension().and_then(|e| e.to_str()).map(str::to_lowercase).as_deref() {
-        Some("mp4") => "video/mp4", Some("png") => "image/png", _ => return respond(StatusCode::NOT_FOUND),
-    };
-    if !library::is_inside(&handle.state::<App>().root(), file) { return respond(StatusCode::FORBIDDEN) }
-    let Ok(mut f) = std::fs::File::open(file) else { return respond(StatusCode::NOT_FOUND) };
-    let size = f.metadata().map(|m| m.len()).unwrap_or(0);
-    use std::io::{Read, Seek, SeekFrom};
-    let range = request.headers().get(header::RANGE).and_then(|v| v.to_str().ok()).and_then(|v| v.strip_prefix("bytes="))
-        .and_then(|v| v.split(',').next()).and_then(|v| v.split_once('-'));
-    let builder = Response::builder().header(header::CONTENT_TYPE, kind).header(header::ACCEPT_RANGES, "bytes")
-        .header("Access-Control-Allow-Origin", "*");
-    let Some((start, end)) = range else {
-        let mut body = Vec::new();
-        return match f.read_to_end(&mut body) { Ok(_) => builder.body(body).unwrap(), Err(_) => respond(StatusCode::INTERNAL_SERVER_ERROR) };
-    };
-    // Open-ended ranges are capped so a 1 GB clip is not read into memory at once.
-    let (start, end) = match (start.parse::<u64>().ok(), end.parse::<u64>().ok()) {
-        (Some(s), Some(e)) => (s, e.min(size.saturating_sub(1))),
-        (Some(s), None) => (s, (s + 8 * 1024 * 1024).min(size).saturating_sub(1)),
-        (None, Some(n)) => (size.saturating_sub(n), size.saturating_sub(1)),
-        (None, None) => return respond(StatusCode::RANGE_NOT_SATISFIABLE),
-    };
-    if size == 0 || start > end || start >= size {
-        return Response::builder().status(StatusCode::RANGE_NOT_SATISFIABLE).header(header::CONTENT_RANGE, format!("bytes */{size}")).body(Vec::new()).unwrap();
-    }
-    let mut body = vec![0u8; (end - start + 1) as usize];
-    if f.seek(SeekFrom::Start(start)).and_then(|_| f.read_exact(&mut body)).is_err() { return respond(StatusCode::INTERNAL_SERVER_ERROR) }
-    builder.status(StatusCode::PARTIAL_CONTENT).header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{size}")).body(body).unwrap()
+/// Wayland ignores where a client asks to put its window, so on KDE a small
+/// KWin script moves any window titled "Flash toast <corner>" into that corner
+/// of the screen's work area as it maps. Loaded once per KWin session.
+fn place_toasts(cache: &Path) {
+    if !std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|d| d.contains("KDE")) || std::env::var_os("WAYLAND_DISPLAY").is_none() { return }
+    const SCRIPT: &str = r#"
+function place(w) {
+    var m = /^Flash toast (top|bottom)-(left|right)$/.exec(w.caption);
+    if (!m) return;
+    var a = workspace.clientArea(KWin.MaximizeArea, w), g = w.frameGeometry, pad = 16;
+    w.frameGeometry = { x: m[2] == "right" ? a.x + a.width - g.width - pad : a.x + pad,
+                        y: m[1] == "bottom" ? a.y + a.height - g.height - pad : a.y + pad,
+                        width: g.width, height: g.height };
+    w.keepAbove = true; w.skipTaskbar = true; w.skipSwitcher = true; w.skipPager = true;
+}
+workspace.windowAdded.connect(function (w) { place(w); w.captionChanged.connect(function () { place(w); }); });
+"#;
+    let file = cache.join("flash-toast-placement.js");
+    if std::fs::create_dir_all(cache).and_then(|_| std::fs::write(&file, SCRIPT)).is_err() { return }
+    let call = |path: &str, method: &str, args: &[&str]| Command::new("gdbus")
+        .args(["call", "--session", "--dest", "org.kde.KWin", "--object-path", path, "--method", method]).args(args)
+        .output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    // Replace an older copy so script changes take effect without a KWin restart.
+    call("/Scripting", "org.kde.kwin.Scripting.unloadScript", &["flash-toast"]);
+    let Some(id) = call("/Scripting", "org.kde.kwin.Scripting.loadScript", &[&file.to_string_lossy(), "flash-toast"])
+        .and_then(|out| out.trim().trim_matches(|c| c == '(' || c == ')' || c == ',').trim_start_matches("int32").trim().parse::<i32>().ok())
+        .filter(|id| *id >= 0) else { eprintln!("flash: could not load the KWin toast script"); return };
+    call(&format!("/Scripting/Script{id}"), "org.kde.kwin.Script.run", &[]);
 }
 
 fn autostart_path() -> PathBuf {
@@ -306,6 +304,7 @@ async fn ipc(channel: String, args: Vec<Value>, app: State<'_, App>, window: Web
             Value::Null
         }
 
+        "clip-base" => json!(*app.clip_base.lock().unwrap()),
         "renderer-log" => { eprintln!("flash renderer: {}", text(0)); Value::Null }
 
         "playback-visibility" => json!(true),
@@ -338,6 +337,7 @@ async fn ipc(channel: String, args: Vec<Value>, app: State<'_, App>, window: Web
             Value::Null
         }
         "capture-save-clip" => save_clip(&handle, arg(0).as_f64().filter(|s| *s > 0.0).unwrap_or(0.0)).await,
+        "get-game-icon" => { let game = text(0); tauri::async_runtime::spawn_blocking(move || json!(icons::lookup(&game))).await.map_err(|e| e.to_string())? }
         "get-current-game" => app.game.lock().unwrap().as_ref().map_or(Value::Null, |g| json!(g.name)),
         "list-audio-apps" => json!({ "supported": false, "apps": [] }),
         "list-mic-devices" => json!({ "devices": [] }),
@@ -436,10 +436,6 @@ async fn ipc(channel: String, args: Vec<Value>, app: State<'_, App>, window: Web
 
 fn main() {
     tauri::Builder::default()
-        .register_asynchronous_uri_scheme_protocol("flash-clip", |ctx, request, responder| {
-            let handle = ctx.app_handle().clone();
-            std::thread::spawn(move || responder.respond(serve(&handle, &request)));
-        })
         .setup(|app| {
             let home = app.path().home_dir()?;
             let config = app.path().config_dir().unwrap_or_else(|_| home.join(".config"));
@@ -448,10 +444,17 @@ fn main() {
             let store = settings::Store::open(&config, &videos);
             let (keys_tx, keys_rx) = watch::channel(Default::default());
             let state = App { settings: Mutex::new(store), saving: Default::default(), game: Mutex::new(None),
-                hotkey_status: Default::default(), hotkey_keys: keys_tx, cache, toasts: AtomicU64::new(0), starting: Mutex::new(()), recording: Default::default() };
+                hotkey_status: Default::default(), hotkey_keys: keys_tx, cache, toasts: AtomicU64::new(0), starting: Mutex::new(()), recording: Default::default(), clip_base: Default::default() };
             state.hotkey_keys.send_replace(state.keys());
             let status = state.hotkey_status.clone();
             app.manage(state);
+
+            { let cache = app.state::<App>().cache.clone(); std::thread::spawn(move || place_toasts(&cache)); }
+            let handle = app.handle().clone();
+            match media::start(move || handle.state::<App>().root()) {
+                Ok(base) => *app.state::<App>().clip_base.lock().unwrap() = base,
+                Err(e) => eprintln!("flash: clip server failed to start: {e}"),
+            }
 
             // Hotkeys through the desktop portal.
             let handle = app.handle().clone();
