@@ -11,7 +11,7 @@ for each component is shipped with that component.
 | [Electron](https://www.electronjs.org/) | 44.7.0 | MIT | Copyright (c) Electron contributors; Copyright (c) 2013-2020 GitHub Inc. |
 | [React](https://react.dev/) | 19.2.8 | MIT | Copyright (c) Meta Platforms, Inc. and affiliates. |
 | [React DOM](https://react.dev/) | 19.2.8 | MIT | Copyright (c) Meta Platforms, Inc. and affiliates. |
-| [Antonio (Fontsource variable)](https://fontsource.org/fonts/antonio) | 5.3.0 | SIL Open Font License 1.1 | Copyright 2013 The Antonio Project Authors (https://github.com/googlefonts/antonioFont) |
+| [Geist (Fontsource variable)](https://fontsource.org/fonts/geist) | 5.3.0 | SIL Open Font License 1.1 | Copyright 2024 The Geist Project Authors (https://github.com/vercel/geist-font) |
 
 Electron bundles Chromium, Node.js and their own third-party dependencies.
 Their notices are included in the packaged application as Electron's `LICENSE`

@@ -52,6 +52,7 @@ function grabStill(filePath: string): Promise<Uint8Array | null> {
       clearTimeout(timer)
       video.removeAttribute('src')
       video.load()
+      video.remove()
       resolve(bytes)
     }
     // A clip that cannot decode must not hold a queue slot forever.
@@ -60,7 +61,16 @@ function grabStill(filePath: string): Promise<Uint8Array | null> {
     video.addEventListener('loadedmetadata', () => {
       video.currentTime = Math.min(0.5, (video.duration || 1) / 2)
     }, { once: true })
+    // WebKitGTK only decodes frames for a video in the document, and fires
+    // seeked before the frame is drawable; wait for the frame itself.
+    video.style.cssText = 'position:fixed;left:0;top:0;width:2px;height:2px;opacity:0;pointer-events:none'
+    document.body.appendChild(video)
     video.addEventListener('seeked', () => {
+      const frame = (video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => void }).requestVideoFrameCallback
+      if (frame) frame.call(video, draw)
+      else setTimeout(draw, 150)
+    }, { once: true })
+    const draw = () => {
       const canvas = document.createElement('canvas')
       canvas.width = WIDTH
       canvas.height = HEIGHT
@@ -71,10 +81,15 @@ function grabStill(filePath: string): Promise<Uint8Array | null> {
       const w = video.videoWidth * scale
       const h = video.videoHeight * scale
       context.drawImage(video, (WIDTH - w) / 2, (HEIGHT - h) / 2, w, h)
+      // An all-black grab is a frame that was not ready, not the clip: never cache it.
+      const pixels = context.getImageData(0, 0, WIDTH, HEIGHT).data
+      let lit = false
+      for (let i = 0; i < pixels.length && !lit; i += 4 * 97) lit = pixels[i] + pixels[i + 1] + pixels[i + 2] > 24
+      if (!lit) { finish(null); return }
       canvas.toBlob(async blob => {
         finish(blob ? new Uint8Array(await blob.arrayBuffer()) : null)
       }, 'image/jpeg', 0.82)
-    }, { once: true })
+    }
     video.src = clipUrl(filePath)
   })
 }

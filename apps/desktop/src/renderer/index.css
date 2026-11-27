@@ -9,97 +9,21 @@
 
 :root,
 [data-theme='blood'] {
-  --bg: #0a0a0b;
-  --panel: #121316;
-  --field: #1b1d22;
-  --edge: #2a2d34;
-  --hover: #1f2126;
-  --fg: #f2f3f5;
-  --muted: #9aa0ab;
-  --accent: #e8192c;
-  --accent-dim: #8c0f1b;
+  /* Redesign spec palette (docs/flash-ui-handoff/DESIGN_SPEC.md §1). */
+  --bg: #0b0b0c;
+  --panel: #141417;
+  --field: #17171a;
+  --edge: #2a2a2f;
+  --hover: #1c1c20;
+  --fg: #f4f4f5;
+  --muted: #9a9aa3;
+  --accent: #d10f0f;
+  --accent-dim: #7a0909;
   --on-accent: #ffffff;
   --spark: #ffb020;
   /* The accent is red on this theme, so errors move to a hot rose that cannot
      be mistaken for a live state. */
   --alert: #ff6b8e;
-}
-
-[data-theme='ultraviolet'] {
-  --bg: #0a090d;
-  --panel: #131218;
-  --field: #1d1b24;
-  --edge: #2d2a37;
-  --hover: #201e28;
-  --fg: #f4f2f8;
-  --muted: #a19caf;
-  --accent: #b45cff;
-  --accent-dim: #6b2bb3;
-  --on-accent: #12051f;
-  --spark: #ff9ad0;
-  --alert: #ff6b6b;
-}
-
-[data-theme='cobalt'] {
-  --bg: #090a0d;
-  --panel: #111318;
-  --field: #1a1e25;
-  --edge: #293039;
-  --hover: #1e2229;
-  --fg: #f1f4f8;
-  --muted: #98a2b3;
-  --accent: #4d7cfe;
-  --accent-dim: #2647a8;
-  --on-accent: #050b1e;
-  --spark: #ffb020;
-  --alert: #ff6b6b;
-}
-
-[data-theme='fuchsia'] {
-  --bg: #0c090b;
-  --panel: #151115;
-  --field: #201a1f;
-  --edge: #33292f;
-  --hover: #221b21;
-  --fg: #fbf2f7;
-  --muted: #ab9ca6;
-  --accent: #ff4fa3;
-  --accent-dim: #a51a62;
-  --on-accent: #1e0512;
-  --spark: #ffb020;
-  /* Coral sits too close to this accent, so errors go deeper red. */
-  --alert: #ff4d5e;
-}
-
-[data-theme='indigo'] {
-  --bg: #09090d;
-  --panel: #121219;
-  --field: #1b1b25;
-  --edge: #2b2b39;
-  --hover: #1f1f2b;
-  --fg: #f2f2fb;
-  --muted: #9d9db8;
-  --accent: #7c74ff;
-  --accent-dim: #4239b8;
-  --on-accent: #070616;
-  --spark: #ff9ad0;
-  --alert: #ff6b6b;
-}
-
-[data-theme='bone'] {
-  /* No hue at all; the only saturated pixels on screen belong to your clips. */
-  --bg: #0a0a0a;
-  --panel: #131313;
-  --field: #1c1c1c;
-  --edge: #2c2c2c;
-  --hover: #202020;
-  --fg: #f2f2f2;
-  --muted: #a0a0a0;
-  --accent: #f0f0f0;
-  --accent-dim: #6a6a6a;
-  --on-accent: #0a0a0a;
-  --spark: #d6d6d6;
-  --alert: #ff6b6b;
 }
 
 /* Derived steps are mixed against the ground, not against transparency, so
@@ -119,8 +43,19 @@
   /* "Live" green stays green on every theme; it is a status, not decoration. */
   --ok: #4ade80;
 
-  --font-display: 'Antonio Variable', 'Bahnschrift SemiCondensed', 'Arial Narrow', sans-serif;
-  --font-ui: 'Segoe UI Variable Text', 'Segoe UI', system-ui, 'Noto Sans', Cantarell, Ubuntu, sans-serif;
+  --font-ui: 'Geist Variable', system-ui, sans-serif;
+  --font-display: var(--font-ui);
+
+  /* Redesign neutrals shared by every theme: content ground, chrome and panel
+     dividers, and the two text steps between --fg and --muted. */
+  --bg-content: #0f0f11;
+  --border: #1f1f23;
+  --border-subtle: #222226;
+  --text-secondary: #d4d4d8;
+  --text-faint: #8b8b94;
+  --danger-text: #ff7b7b;
+  --error-bg: #1a1112;
+  --error-border: #4a1d20;
 
   --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
 }
@@ -158,18 +93,14 @@ html, body {
 .display {
   font-family: var(--font-display);
   font-weight: 600;
-  text-transform: uppercase;
-  line-height: 0.92;
-  letter-spacing: -0.005em;
-  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
 }
 
-/* Small tracked capitals: author lines, labels, buttons, navigation. */
+/* Small labels: sentence case at normal spacing (the spec rules out tracked capitals). */
 .caps {
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .tabular { font-variant-numeric: tabular-nums; }
@@ -184,13 +115,11 @@ html, body {
   height: 34px;
   padding: 0 16px;
   border-radius: 6px;
-  border: 1px solid var(--line);
-  background: transparent;
+  border: 1px solid var(--edge);
+  background: var(--field);
   color: var(--fg);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
   transition: background 140ms ease, border-color 140ms ease, color 140ms ease, opacity 140ms ease;
@@ -203,7 +132,15 @@ html, body {
 .btn-solid { background: var(--fg); color: var(--bg); border-color: var(--fg); }
 .btn-solid:hover:not(:disabled) { background: color-mix(in srgb, var(--fg) 86%, var(--bg)); border-color: transparent; }
 
-.btn-sm { height: 28px; padding: 0 12px; font-size: 10px; }
+.btn-sm { height: 30px; padding: 0 12px; font-size: 12px; }
+
+/* Filled key chip for hotkeys in running text and the title bar (spec §2). */
+.chip-key {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 20px; height: 20px; padding: 0 6px; border-radius: 4px;
+  background: #2a2a30; color: var(--text-secondary);
+  font-family: inherit; font-size: 11px; font-weight: 600;
+}
 
 .btn-danger { color: var(--alert); border-color: color-mix(in srgb, var(--alert) 45%, transparent); }
 .btn-danger:hover:not(:disabled) { background: color-mix(in srgb, var(--alert) 12%, transparent); border-color: var(--alert); }
@@ -221,10 +158,8 @@ html, body {
   background: none;
   border: 0;
   color: var(--muted-3);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 13px;
+  font-weight: 500;
   white-space: nowrap;
   cursor: pointer;
   transition: color 140ms ease;
@@ -238,7 +173,7 @@ html, body {
   height: 1px;
   background: var(--fg);
 }
-.tab .count { font-size: 10px; letter-spacing: 0.06em; color: var(--faint); font-variant-numeric: tabular-nums; }
+.tab .count { font-size: 12px; color: var(--faint); font-variant-numeric: tabular-nums; }
 .tab[aria-pressed='true'] .count { color: var(--muted-2); }
 
 /* Feed side rail: one outlined glyph per action, the label under it. */
@@ -263,10 +198,8 @@ html, body {
 .rail-btn:hover:not(:disabled) svg { transform: scale(1.08); }
 .rail-btn:active:not(:disabled) svg { transform: scale(0.92); }
 .rail-btn span {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
+  font-size: 12px;
+  font-weight: 500;
   color: var(--fg);
 }
 .rail-btn:disabled { opacity: 0.35; cursor: default; }
@@ -530,3 +463,60 @@ html, body {
 @media (prefers-reduced-motion: reduce) {
   .tile-still, .tile-live, .tile-pending { animation: none; }
 }
+
+/* Library search: grows while in use, so long game names fit. */
+.search-field {
+  width: 180px;
+  transition: width 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.search-field:focus,
+.search-field:not(:placeholder-shown) {
+  width: 320px;
+}
+
+/* Window controls: rounded squares that light up softly; close turns red. */
+.win-btn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--text-faint);
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.win-btn:hover { background: var(--hover); color: var(--fg); }
+.win-btn:active { background: var(--edge); }
+.win-btn-close:hover { background: #c42b1c; color: #fff; }
+.win-btn-close:active { background: #a52314; }
+
+/* Viewer seek and volume bars. */
+.viewer-range { appearance: none; height: 4px; border-radius: 99px; background: var(--edge); accent-color: var(--fg); cursor: pointer; }
+.viewer-range::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; border-radius: 99px; background: var(--fg); }
+
+/* Settings: bordered panels of rows, sidebar-style section nav. */
+.settings-panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 8px; padding: 0 20px; }
+.settings-row { padding: 14px 0; border-bottom: 1px solid var(--border-subtle, var(--edge)); }
+.settings-panel > :last-child, .settings-panel > .settings-row:last-child { border-bottom: 0; }
+.settings-nav {
+  display: flex; align-items: center; width: 100%; height: 34px; padding: 0 10px; border-radius: 6px;
+  font-size: 14px; font-weight: 500; color: var(--text-secondary, var(--muted)); text-align: left;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+.settings-nav:hover { background: var(--hover); color: var(--fg); }
+.settings-nav[aria-current='page'] { background: var(--hover); color: var(--fg); }
+
+/* Notification corner: a tiny screen with a button in each corner. */
+.corner-picker {
+  position: relative; width: 96px; height: 60px; border-radius: 6px;
+  border: 1px solid var(--edge); background: var(--field);
+}
+.corner-picker button {
+  position: absolute; width: 30px; height: 12px; border-radius: 3px;
+  background: var(--edge); transition: background-color 0.12s ease;
+}
+.corner-picker button:hover { background: var(--muted); }
+.corner-picker button[aria-checked='true'] { background: var(--accent); }
+.corner-picker [data-corner='top-left'] { top: 6px; left: 6px; }
+.corner-picker [data-corner='top-right'] { top: 6px; right: 6px; }
+.corner-picker [data-corner='bottom-left'] { bottom: 6px; left: 6px; }
+.corner-picker [data-corner='bottom-right'] { bottom: 6px; right: 6px; }
