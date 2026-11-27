@@ -1,3 +1,4 @@
+import type React from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { clipUrl } from '../shared/editor'
 import { clipDisplayTitle } from '../shared/clipTitle'
@@ -26,9 +27,9 @@ function captured(timestamp: number): string {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-col min-w-0" style={{ gap: 4, padding: '10px 12px', borderRadius: 8, background: 'var(--field)', border: '1px solid var(--border-subtle, var(--edge))' }}>
-      <span style={{ fontSize: 12, color: 'var(--muted)' }}>{label}</span>
-      <span className="tabular truncate" style={{ fontSize: 13, fontWeight: 500, color: 'var(--fg)' }}>{value}</span>
+    <div className="flex items-center justify-between" style={{ gap: 12, padding: '11px 0', borderBottom: '1px solid var(--border-subtle, var(--edge))' }}>
+      <dt style={{ fontSize: 13, color: 'var(--muted)' }}>{label}</dt>
+      <dd className="tabular" style={{ margin: 0, fontSize: 13, fontWeight: 500, color: 'var(--fg)', textAlign: 'right' }}>{value}</dd>
     </div>
   )
 }
@@ -162,9 +163,10 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
               <button className="win-btn" aria-label={playing ? 'Pause' : 'Play'} onClick={toggle}><Icon name={playing ? 'pause' : 'play'} size={16} /></button>
               <span className="tabular" style={{ fontSize: 12, color: 'var(--muted)', minWidth: 76 }}>{timecode(time)} / {timecode(duration || clip.durationSec)}</span>
               <input type="range" aria-label="Seek" className="viewer-range flex-1" min={0} max={duration || clip.durationSec || 1} step={0.01} value={time}
+                style={{ '--fill': `${Math.min(100, (time / (duration || clip.durationSec || 1)) * 100)}%` } as React.CSSProperties}
                 onChange={e => { const v = Number(e.target.value); setTime(v); if (videoRef.current) videoRef.current.currentTime = v }} />
               <button className="win-btn" aria-label={volume ? 'Mute' : 'Unmute'} onClick={() => setVolume(v => v ? 0 : 0.8)}><Icon name={volume ? 'volume' : 'mute'} size={16} /></button>
-              <input type="range" aria-label="Volume" className="viewer-range" style={{ width: 80 }} min={0} max={1} step={0.01} value={volume} onChange={e => setVolume(Number(e.target.value))} />
+              <input type="range" aria-label="Volume" className="viewer-range" style={{ width: 80, '--fill': `${volume * 100}%` } as React.CSSProperties} min={0} max={1} step={0.01} value={volume} onChange={e => setVolume(Number(e.target.value))} />
               <button className="win-btn" aria-label="Full screen" onClick={() => void videoRef.current?.requestFullscreen?.()}><Icon name="grid" size={16} /></button>
             </div>
           )}
@@ -177,11 +179,11 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
           <RenameTitle title={clip.title} display={clipDisplayTitle(clip.title)} onCommit={name => onRename(clip, name)} style={{ fontSize: 18, fontWeight: 600, color: 'var(--fg)', lineHeight: 1.3 }} />
         </div>
 
-        <div className="grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
+        <dl className="flex flex-col" style={{ margin: 0, borderTop: '1px solid var(--border-subtle, var(--edge))' }}>
           <Stat label="Captured" value={captured(clip.createdAt)} />
           <Stat label="Length" value={isShot ? 'Screenshot' : clip.duration} />
           <Stat label="Size" value={formatBytes(clip.size)} />
-        </div>
+        </dl>
 
         <div className="flex flex-col" style={{ gap: 8 }}>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>Game</span>

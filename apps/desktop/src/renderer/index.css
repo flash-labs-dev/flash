@@ -499,8 +499,12 @@ input, textarea, [contenteditable="true"] {
 .win-btn-close:active { background: #a52314; }
 
 /* Viewer seek and volume bars. */
-.viewer-range { appearance: none; height: 4px; border-radius: 99px; background: var(--edge); accent-color: var(--fg); cursor: pointer; }
-.viewer-range::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; border-radius: 99px; background: var(--fg); }
+/* Viewer bars: the played part fills in; the knob shows on hover. */
+.viewer-range { appearance: none; height: 4px; border-radius: 99px; cursor: pointer; transition: height 120ms;
+  background: linear-gradient(to right, var(--fg) var(--fill, 0%), color-mix(in srgb, var(--fg) 18%, transparent) var(--fill, 0%)); }
+.viewer-range:hover { height: 6px; }
+.viewer-range::-webkit-slider-thumb { appearance: none; width: 12px; height: 12px; border-radius: 99px; background: var(--fg); opacity: 0; transition: opacity 120ms; }
+.viewer-range:hover::-webkit-slider-thumb, .viewer-range:focus-visible::-webkit-slider-thumb { opacity: 1; }
 
 /* Settings: bordered panels of rows, sidebar-style section nav. */
 .settings-panel { background: var(--panel); border: 1px solid var(--edge); border-radius: 8px; padding: 0 20px; }
