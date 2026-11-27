@@ -74,7 +74,50 @@ function IconButton({ label, icon, onClick, disabled }: { label: string; icon: R
   )
 }
 
-function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailable, hotkey, hotkeyShort, saveState, onFeedback }: {
+type UpdateState = { status: 'idle' | 'downloading' | 'ready'; version?: string }
+
+// The bell: update notices for now. A dot means there is something to read.
+function Notices({ update }: { update: UpdateState }) {
+  const [open, setOpen] = useState(false)
+  const box = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent ? event.key === 'Escape' : !box.current?.contains(event.target as Node)) setOpen(false)
+    }
+    window.addEventListener('mousedown', close)
+    window.addEventListener('keydown', close)
+    return () => { window.removeEventListener('mousedown', close); window.removeEventListener('keydown', close) }
+  }, [open])
+  const unread = update.status !== 'idle'
+  return (
+    <div ref={box} className="relative titlebar-no-drag">
+      <button aria-label={unread ? 'Notifications, 1 new' : 'Notifications'} aria-expanded={open} onClick={() => setOpen(o => !o)}
+        className="win-btn relative" style={{ width: 40, height: 40 }}>
+        <Icon name="bell" />
+        {unread && <span aria-hidden="true" style={{ position: 'absolute', top: 9, right: 10, width: 7, height: 7, borderRadius: 99, background: 'var(--accent)' }} />}
+      </button>
+      {open && (
+        <div role="dialog" aria-label="Notifications" className="absolute"
+          style={{ right: 0, top: 44, width: 290, padding: 14, borderRadius: 8, background: 'var(--panel)', border: '1px solid var(--edge)', boxShadow: '0 12px 32px rgba(0,0,0,.45)', zIndex: 50 }}>
+          <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--fg)', marginBottom: 10 }}>Notifications</div>
+          {update.status === 'ready' ? (
+            <div className="flex flex-col" style={{ gap: 10 }}>
+              <span style={{ fontSize: 13, color: 'var(--fg)' }}>Flash {update.version ?? 'update'} is ready to install.</span>
+              <button className="btn btn-solid btn-sm" onClick={() => window.flash?.installUpdate()}>Restart to update</button>
+            </div>
+          ) : update.status === 'downloading' ? (
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>Downloading an update{update.version ? ` (${update.version})` : ''}…</span>
+          ) : (
+            <span style={{ fontSize: 13, color: 'var(--muted)' }}>You're up to date. Update notices will show up here.</span>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailable, hotkey, hotkeyShort, saveState, onFeedback, update }: {
   onFeedback: () => void
   isRecording: boolean
   onToggleRecording: () => void
@@ -83,6 +126,7 @@ function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailab
   hotkey: string
   hotkeyShort: string
   saveState: { saving: boolean; error?: string }
+  update: UpdateState
 }) {
   const live = captureAvailable && isRecording
   return (
@@ -120,9 +164,7 @@ function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailab
         )}
         <button onClick={onFeedback} className="titlebar-no-drag" style={{ fontSize: 13, color: 'var(--text-faint)', padding: '0 10px', height: 40, cursor: 'pointer' }}
           title="Tell us what's broken or what you want. We read every message.">Feedback</button>
-        {/* TODO: notifications and accounts have no backend yet. */}
-        <IconButton label="Notifications" icon="bell" disabled />
-        <IconButton label="Account" icon="user" disabled />
+        <Notices update={update} />
         <span aria-hidden="true" style={{ width: 1, height: 20, background: 'var(--edge)', margin: '0 8px' }} />
         <WindowControls />
       </div>
@@ -203,7 +245,7 @@ export default function App() {
   const [feedPath, setFeedPath] = useState('')
   const [editingClip, setEditingClip] = useState<Clip | null>(null)
   const [feedbackOpen, setFeedbackOpen] = useState(false)
-  const [update, setUpdate] = useState<{ status: 'idle' | 'downloading' | 'ready'; version?: string }>({ status: 'idle' })
+  const [update, setUpdate] = useState<UpdateState>({ status: 'idle' })
   const [updateDismissed, setUpdateDismissed] = useState(false)
   const [feedbackSent, setFeedbackSent] = useState(false)
   const [isRecording, setIsRecording] = useState(false)
@@ -557,7 +599,7 @@ export default function App() {
       <TitleBar
         isRecording={isRecording} onToggleRecording={toggleRecording}
         detectedGame={detectedGame} captureAvailable={captureAvailable}
-        hotkey={settings.hotkey} hotkeyShort={settings.hotkeyShort} saveState={saveState}
+        hotkey={settings.hotkey} hotkeyShort={settings.hotkeyShort} saveState={saveState} update={update}
         onFeedback={() => setFeedbackOpen(true)}
       />
       <Sidebar

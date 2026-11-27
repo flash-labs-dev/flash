@@ -275,7 +275,7 @@ function HotkeyInput({ value, registered, onChange, label }: {
       title={failed ? 'Another program already owns this key. Pick a different one.' : 'Click, then press a key'}
       className="tabular transition-colors"
       style={{
-        height: 32, minWidth: 112, padding: '0 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
+        height: 32, minWidth: 112, padding: '0 14px', borderRadius: 6, fontSize: 13, fontWeight: 500,
         color: listening ? 'var(--fg)' : failed ? 'var(--alert)' : 'var(--fg)',
         background: listening ? 'var(--glass)' : 'transparent',
         border: `1px solid ${listening ? 'var(--fg)' : failed ? 'var(--alert)' : 'var(--line)'}`,
