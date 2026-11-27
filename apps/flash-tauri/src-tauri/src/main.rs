@@ -15,6 +15,7 @@ mod icons;
 mod library;
 mod media;
 mod settings;
+mod share;
 
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
@@ -264,6 +265,13 @@ fn copy_file(file: &Path) -> bool {
     wrote && child.wait().is_ok_and(|s| s.success())
 }
 
+pub fn copy_text(text: &str) -> bool {
+    use std::io::Write;
+    let Ok(mut child) = Command::new("wl-copy").stdin(std::process::Stdio::piped()).spawn() else { return false };
+    let wrote = child.stdin.take().is_some_and(|mut stdin| stdin.write_all(text.as_bytes()).is_ok());
+    wrote && child.wait().is_ok_and(|s| s.success())
+}
+
 fn bytes(value: &Value) -> Option<Vec<u8>> {
     value.as_array()?.iter().map(|b| b.as_u64().filter(|b| *b < 256).map(|b| b as u8)).collect()
 }
@@ -423,8 +431,20 @@ async fn ipc(channel: String, args: Vec<Value>, app: State<'_, App>, window: Web
         }
 
         // Not ported yet: the editor's lossless trim/export and the cloud features.
-        "trim-clip" | "save-clip-edit" | "export-clip" | "decode-clip-audio" | "get-clip-keyframes"
-        | "share-clip-link" | "save-shared-clip" | "send-feedback" =>
+        "share-clip-link" | "export-clip" => {
+            let file = PathBuf::from(text(0));
+            if !library::is_inside(&root, &file) || !file.is_file() { return Ok(json!({ "ok": false, "error": "Clip not found" })) }
+            if !file.extension().is_some_and(|e| e.eq_ignore_ascii_case("mp4")) { return Ok(json!({ "ok": false, "error": "Only clips can be shared" })) }
+            let max_bytes = args.get(1).and_then(Value::as_f64).unwrap_or(0.0);
+            let exporting = channel == "export-clip";
+            if exporting && !(max_bytes > 0.0) { return Ok(json!({ "error": "Export size is not valid" })) }
+            let result = tauri::async_runtime::spawn_blocking(move || if exporting { share::export(&file, max_bytes) } else { share::share(&file) })
+                .await.map_err(|e| e.to_string())?;
+            if exporting && result.get("path").is_some() { handle.emit("clip-saved-refresh", Vec::<Value>::new()).ok(); }
+            result
+        }
+        "trim-clip" | "save-clip-edit" | "decode-clip-audio" | "get-clip-keyframes"
+        | "save-shared-clip" | "send-feedback" =>
             json!({ "error": "This is not in the Linux build yet." }),
         "install-update" | "start-clip-drag" => Value::Null,
 

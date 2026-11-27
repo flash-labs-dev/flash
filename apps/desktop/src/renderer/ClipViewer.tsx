@@ -2,6 +2,8 @@ import type React from 'react'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { clipUrl } from '../shared/editor'
 import { clipDisplayTitle } from '../shared/clipTitle'
+import { Dropdown } from './Dropdown'
+import { DEFAULT_EXPORT_LIMIT, EXPORT_LIMITS, codecNote, findExportLimit } from '../shared/exportLimits'
 import { type Clip, GameMark, Icon, RenameTitle, formatBytes } from './ui'
 
 // The clip viewer from docs/flash-ui-handoff (Viewer): back to the library,
@@ -63,13 +65,18 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
   const [duration, setDuration] = useState(0)
   const [volume, setVolume] = useState(0.8)
   const [note, setNote] = useState<string | null>(null)
+  const [busy, setBusy] = useState<'share' | 'export' | null>(null)
+  const [link, setLink] = useState<{ url: string; days: number } | null>(null)
+  const [linkCopied, setLinkCopied] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportLimit, setExportLimit] = useState(DEFAULT_EXPORT_LIMIT)
 
   const go = useCallback((step: number) => {
     const next = clips[index + step]
     if (next) onPathChange(next.filePath)
   }, [clips, index, onPathChange])
 
-  useEffect(() => { setNote(null); setTime(0); setDuration(0) }, [clip?.filePath])
+  useEffect(() => { setNote(null); setTime(0); setDuration(0); setLink(null); setExportOpen(false) }, [clip?.filePath])
   useEffect(() => { if (videoRef.current) videoRef.current.volume = volume }, [volume, clip?.filePath])
 
   const toggle = useCallback(() => {
@@ -82,6 +89,8 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement
       if (target.closest('input, textarea, [contenteditable="true"]')) return
+      // While the link dialog or export menu is up, keys must not move between clips.
+      if (link || exportOpen) { if (event.key === 'Escape') { setLink(null); setExportOpen(false) } return }
       if (event.key === 'ArrowLeft') { event.preventDefault(); go(-1) }
       else if (event.key === 'ArrowRight') { event.preventDefault(); go(1) }
       else if (event.key === ' ') { event.preventDefault(); toggle() }
@@ -90,7 +99,7 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [go, toggle, clip, onDelete, onOpenLibrary])
+  }, [go, toggle, clip, onDelete, onOpenLibrary, link, exportOpen])
 
   const grabFrame = useCallback(async () => {
     const video = videoRef.current
@@ -108,6 +117,30 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
       setNote(error instanceof Error ? error.message : 'Could not grab the frame')
     }
   }, [clip])
+
+  // Uploads the clip and copies a link that works for a few days (Discord embeds it).
+  const share = useCallback(async () => {
+    if (!clip) return
+    setBusy('share'); setNote(null)
+    try {
+      const result = await window.flash?.shareClipLink(clip.filePath)
+      if (result?.ok) { setLinkCopied(false); setLink({ url: result.url, days: result.days }) }
+      else setNote(result?.error ?? 'Could not make a link')
+    } catch { setNote('Could not make a link') } finally { setBusy(null) }
+  }, [clip])
+
+  // A smaller sibling that fits an upload limit; it re-encodes, so it takes seconds.
+  const exportCopy = useCallback(async () => {
+    if (!clip) return
+    setBusy('export'); setNote(null); setExportOpen(false)
+    const limit = findExportLimit(exportLimit)
+    try {
+      const result = await window.flash?.exportClip(clip.filePath, limit.bytes, limit.codec)
+      if (!result || result.error) { setNote(result?.error ?? 'Export failed'); return }
+      const fallback = codecNote(limit.codec, result.codec)
+      setNote(`Shareable copy saved: ${formatBytes(result.bytes ?? 0)} at ${result.height}p${fallback ? `. ${fallback}` : ''}`)
+    } catch (error) { setNote(error instanceof Error ? error.message : 'Export failed') } finally { setBusy(null) }
+  }, [clip, exportLimit])
 
   const copy = useCallback(async () => {
     if (!clip) return
@@ -133,7 +166,23 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
   )
 
   return (
-    <div className="absolute flex" style={{ inset: 0, padding: 24, gap: 24 }}>
+    <div className="absolute flex" style={{ inset: 0, padding: 16, gap: 16 }}>
+      {link && (
+        <div role="dialog" aria-label="Clip link" className="absolute inset-0 flex items-center justify-center"
+          style={{ zIndex: 50, background: 'rgba(0,0,0,0.6)' }} onClick={() => setLink(null)}>
+          <div onClick={e => e.stopPropagation()} className="flex flex-col" style={{ gap: 12, width: 420, maxWidth: '90%', padding: 20, borderRadius: 8, background: 'var(--panel)', border: '1px solid var(--edge)' }}>
+            <div style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>Link ready</div>
+            <input readOnly value={link.url} onFocus={e => e.currentTarget.select()} className="field" style={{ width: '100%', height: 36, padding: '0 12px' }} />
+            <div style={{ fontSize: 12, color: 'var(--muted)' }}>Already copied to your clipboard. Works for {link.days} days.</div>
+            <div className="flex justify-end" style={{ gap: 8 }}>
+              <button className="btn btn-sm" onClick={() => setLink(null)}>Close</button>
+              <button className="btn btn-sm btn-solid" onClick={async () => {
+                try { await navigator.clipboard.writeText(link.url); setLinkCopied(true) } catch { setLinkCopied(false) }
+              }}>{linkCopied ? 'Copied' : 'Copy link'}</button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex flex-col flex-1 min-w-0" style={{ gap: 14 }}>
         <div className="flex items-center" style={{ gap: 12 }}>
           <button className="btn btn-sm" onClick={onOpenLibrary}><Icon name="left" size={14} /> Library</button>
@@ -142,17 +191,24 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
               {filterLabel}<button className="btn btn-sm" onClick={onClearFilters}>Show all</button>
             </span>
           )}
-          <span className="ml-auto flex items-center tabular" style={{ gap: 10, fontSize: 12, color: 'var(--text-faint, var(--muted))' }}>
-            <span className="chip-key">←</span><span className="chip-key">→</span> switch clips
-            <span style={{ marginLeft: 8 }}>{index + 1} of {clips.length}</span>
-          </span>
         </div>
 
-        <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden" style={{ borderRadius: 8, background: '#000', border: '1px solid var(--border-subtle, var(--edge))' }}>
-          <div className="relative flex-1 min-h-0 flex items-center justify-center" onClick={isShot ? undefined : toggle} style={{ cursor: isShot ? 'default' : 'pointer' }}>
+        {/* The player keeps the clip's 16:9 shape, so the video fills it with no black bars. */}
+        <div className="flex-1 min-h-0 flex items-center justify-center">
+        <div className="viewer-player relative flex flex-col overflow-hidden" style={{ width: '100%', maxHeight: '100%', borderRadius: 10, background: '#000', border: '1px solid var(--border-subtle, var(--edge))' }}>
+          <div className="relative flex items-center justify-center" onClick={isShot ? undefined : toggle} style={{ aspectRatio: '16 / 9', minHeight: 0, flexShrink: 1, cursor: isShot ? 'default' : 'pointer' }}>
+            {clips.length > 1 && <span className="viewer-count tabular">{index + 1} / {clips.length}</span>}
+            {index > 0 && (
+              <button className="viewer-nav" style={{ left: 12 }} aria-label="Previous clip" title="Previous clip (←)"
+                onClick={e => { e.stopPropagation(); go(-1) }}><Icon name="left" size={20} /></button>
+            )}
+            {index < clips.length - 1 && (
+              <button className="viewer-nav" style={{ right: 12 }} aria-label="Next clip" title="Next clip (→)"
+                onClick={e => { e.stopPropagation(); go(1) }}><span style={{ display: 'flex', transform: 'scaleX(-1)' }}><Icon name="left" size={20} /></span></button>
+            )}
             {isShot
-              ? <img src={src} alt={clip.title} className="max-w-full max-h-full object-contain" />
-              : <video key={clip.filePath} ref={videoRef} src={src} autoPlay playsInline className="max-w-full max-h-full"
+              ? <img src={src} alt={clip.title} className="w-full h-full object-contain" />
+              : <video key={clip.filePath} ref={videoRef} src={src} autoPlay playsInline className="w-full h-full object-contain"
                   onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
                   onTimeUpdate={e => setTime(e.currentTarget.currentTime)}
                   onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
@@ -171,9 +227,10 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
             </div>
           )}
         </div>
+        </div>
       </div>
 
-      <aside className="flex flex-col shrink-0 overflow-y-auto" style={{ width: 340, gap: 18, padding: 20, borderRadius: 8, background: 'var(--panel)', border: '1px solid var(--border-subtle, var(--edge))' }}>
+      <aside className="flex flex-col shrink-0 overflow-y-auto" style={{ width: 288, gap: 18, padding: 20, borderRadius: 8, background: 'var(--panel)', border: '1px solid var(--border-subtle, var(--edge))' }}>
         <div className="flex flex-col" style={{ gap: 6 }}>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>Title</span>
           <RenameTitle title={clip.title} display={clipDisplayTitle(clip.title)} onCommit={name => onRename(clip, name)} style={{ fontSize: 18, fontWeight: 600, color: 'var(--fg)', lineHeight: 1.3 }} />
@@ -194,7 +251,20 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
 
         <div className="flex flex-col mt-auto" style={{ gap: 8 }}>
           {note && <p role="status" style={{ fontSize: 12, color: 'var(--muted)' }}>{note}</p>}
-          {action('copy', 'Copy clip', copy, { background: 'var(--fg)', color: 'var(--bg)', borderColor: 'var(--fg)' })}
+          {/\.mp4$/i.test(clip.filePath) && action('link', busy === 'share' ? 'Uploading…' : 'Share clip', share, { background: 'var(--fg)', color: 'var(--bg)', borderColor: 'var(--fg)' })}
+          {action('copy', 'Copy clip', copy)}
+          {!isShot && (
+            <div className="relative">
+              {action('download', busy === 'export' ? 'Exporting…' : 'Export', () => setExportOpen(open => !open))}
+              {exportOpen && (
+                <div className="absolute flex flex-col" style={{ bottom: 42, left: 0, right: 0, gap: 8, padding: 12, borderRadius: 8, background: 'var(--panel)', border: '1px solid var(--edge)', boxShadow: '0 12px 32px rgba(0,0,0,.45)', zIndex: 20 }}>
+                  <span style={{ fontSize: 12, color: 'var(--muted)' }}>Fit under</span>
+                  <Dropdown title="Upload limit" value={exportLimit} onChange={setExportLimit} options={EXPORT_LIMITS} width={276} />
+                  <button className="btn btn-solid btn-sm" onClick={() => void exportCopy()}>Export copy</button>
+                </div>
+              )}
+            </div>
+          )}
           {!isShot && action('edit', 'Edit clip', () => onEdit(clip))}
           {!isShot && action('camera', 'Grab frame', grabFrame)}
           {action('star', clip.starred ? 'Remove from favorites' : 'Favorite', () => onStar(clip))}
