@@ -7,7 +7,7 @@ import type { AutostartState } from '../preload/preload'
 import { assignApp, laneLabel } from '../shared/audioLanes'
 import { FEEDBACK_MAX_LENGTH, validateFeedback } from '../shared/feedback'
 import { Dropdown } from './Dropdown'
-import { Toggle, formatBytes } from './ui'
+import { Icon, Toggle, formatBytes } from './ui'
 
 export interface Settings {
   clipsFolder: string
@@ -30,6 +30,7 @@ export interface Settings {
   micDeviceId: string
   autoSave: boolean
   notifications: boolean
+  discordPresence: boolean
   autoDeleteDays: number
   perGame: Record<string, { quality?: string; bufferLength?: number }>
 }
@@ -269,19 +270,27 @@ function HotkeyInput({ value, registered, onChange, label }: {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [listening, onChange])
 
-  const failed = !registered && !listening
+  const unset = !value
+  const failed = !registered && !listening && !unset
   return (
-    <button type="button" onClick={() => setListening(l => !l)} aria-label={`${label}: ${value}. Click to change`}
-      title={failed ? 'Another program already owns this key. Pick a different one.' : 'Click, then press a key'}
-      className="tabular transition-colors"
-      style={{
-        height: 32, minWidth: 112, padding: '0 14px', borderRadius: 6, fontSize: 13, fontWeight: 500,
-        color: listening ? 'var(--fg)' : failed ? 'var(--alert)' : 'var(--fg)',
-        background: listening ? 'var(--glass)' : 'transparent',
-        border: `1px solid ${listening ? 'var(--fg)' : failed ? 'var(--alert)' : 'var(--line)'}`,
-      }}>
-      {listening ? 'Press a key…' : failed ? `${value} is taken` : value}
-    </button>
+    <span className="flex items-center gap-2">
+      <button type="button" onClick={() => setListening(l => !l)} aria-label={`${label}: ${value || 'not set'}. Click to change`}
+        title={failed ? 'Another program already owns this key. Pick a different one.' : 'Click, then press a key'}
+        className="tabular transition-colors"
+        style={{
+          height: 32, minWidth: 112, padding: '0 14px', borderRadius: 6, fontSize: 13, fontWeight: 500,
+          color: listening ? 'var(--fg)' : failed ? 'var(--alert)' : unset ? 'var(--muted)' : 'var(--fg)',
+          background: listening ? 'var(--glass)' : 'transparent',
+          border: `1px solid ${listening ? 'var(--fg)' : failed ? 'var(--alert)' : 'var(--line)'}`,
+        }}>
+        {listening ? 'Press a key…' : unset ? 'Not set' : failed ? `${value} is taken` : value}
+      </button>
+      {/* Unbind: the key does nothing in Flash until a new one is set. */}
+      <button type="button" className="win-btn" aria-label={`Unbind ${label.toLowerCase()}`} title="Unbind"
+        disabled={unset} onClick={() => onChange('')} style={{ visibility: unset ? 'hidden' : 'visible' }}>
+        <Icon name="close" size={14} />
+      </button>
+    </span>
   )
 }
 
@@ -631,6 +640,9 @@ export function SettingsView({ settings, onChange, storage, encoder, captureBack
                     onClick={() => onChange({ overlayPosition: value })} data-corner={value} />
                 ))}
               </div>
+            </Row>
+            <Row label="Discord presence" hint="Shows “Clipping <game> with Flash” on your Discord profile while you play.">
+              <Toggle label="Discord presence" on={settings.discordPresence} onChange={() => onChange({ discordPresence: !settings.discordPresence })} />
             </Row>
             <Row label="In-game overlay"
               hint="Shows recording status over borderless and windowed games. It never hooks the game, so it is safe with anti-cheat, but it cannot draw over exclusive fullscreen.">

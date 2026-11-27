@@ -77,6 +77,8 @@ const DEFAULTS = {
   micDeviceId: '',   // empty = the Windows default communications mic
   autoSave: true,
   notifications: true,
+  // Shown by the Linux build only for now.
+  discordPresence: true,
   autoDeleteDays: 0,  // 0 = never
   // WHICH installer request has already been acted on for this Windows
   // account, as the marker file's modification time. Not a boolean: the app
