@@ -56,6 +56,7 @@ export interface Settings {
   micDeviceId: string
   autoSave: boolean
   notifications: boolean
+  discordPresence: boolean
   autoDeleteDays: number
   perGame: Record<string, { quality?: string; bufferLength?: number }>
 }

@@ -150,7 +150,7 @@ function TitleBar({ isRecording, onToggleRecording, detectedGame, captureAvailab
       </button>
 
       <div className="flex items-center gap-4" style={{ fontSize: 13, color: 'var(--muted)' }}>
-        <span className="flex items-center gap-2"><KeyChips combo={hotkey} />Save clip</span>
+        {hotkey && <span className="flex items-center gap-2"><KeyChips combo={hotkey} />Save clip</span>}
         {hotkeyShort && <span className="flex items-center gap-2"><KeyChips combo={hotkeyShort} />Short clip</span>}
       </div>
 
@@ -259,7 +259,7 @@ export default function App() {
     shortClipSeconds: 15, displayId: 0, captureMode: 'game', overlay: true, overlayPosition: 'top-left',
     voiceEnabled: false, voicePhrase: '', voiceRawFloor: 0.5, voiceCooldownMs: 3000,
     quality: '1080p 60fps', bufferLength: 30,
-    audioCapture: true, audioLanes: DEFAULT_AUDIO_LANES, micDeviceId: '', autoSave: true, notifications: true, autoDeleteDays: 0,
+    audioCapture: true, audioLanes: DEFAULT_AUDIO_LANES, micDeviceId: '', autoSave: true, notifications: true, discordPresence: true, autoDeleteDays: 0,
     perGame: {},
   })
   const [encoder, setEncoder] = useState('none')

@@ -70,7 +70,8 @@ export function sanitise<T extends Record<string, unknown>>(defaults: T, parsed:
     if (key === 'theme' && !Object.hasOwn(THEMES, value as string)) continue
     if (key === 'captureMode' && !['game', 'screen'].includes(value as string)) continue
     if (key === 'overlayPosition' && !['top-left', 'top-right', 'bottom-left', 'bottom-right'].includes(value as string)) continue
-    if (['hotkey', 'hotkeyShort', 'screenshotHotkey'].includes(key) && !(value as string).trim()) continue
+    // An empty hotkey means unbound: the user cleared it on purpose.
+    if (['hotkey', 'hotkeyShort', 'screenshotHotkey'].includes(key)) { clean[key] = (value as string).trim(); continue }
 
     clean[key] = value
   }

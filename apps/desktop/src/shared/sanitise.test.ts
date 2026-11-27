@@ -93,7 +93,9 @@ for (const overlayPosition of ['top-left', 'top-right', 'bottom-left', 'bottom-r
 assert.deepEqual(sanitise(settings, { overlayPosition: 'center' }), {})
 for (const key of ['hotkey', 'hotkeyShort', 'screenshotHotkey']) {
   assert.deepEqual(sanitise(settings, { [key]: 'Ctrl+F9' }), { [key]: 'Ctrl+F9' })
-  for (const value of ['', '  ', null]) assert.deepEqual(sanitise(settings, { [key]: value }), {})
+  // Cleared means unbound.
+  for (const value of ['', '  ']) assert.deepEqual(sanitise(settings, { [key]: value }), { [key]: '' })
+  assert.deepEqual(sanitise(settings, { [key]: null }), {})
 }
 assert.deepEqual(sanitise(settings, { perGame: {
   good: { quality: '4K 60fps', bufferLength: 300, extra: true },
