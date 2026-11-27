@@ -32,7 +32,9 @@ class PipeWireVideo final : public VideoSource {
     uint32_t display_ = 0;
     std::atomic<bool> retarget_{false};
     std::string backend_ = "portal-pipewire";
-    std::string failedWindow_;  // a window KWin refused; not retried until the game changes
+    // A window KWin refused, retried after 30 s so one transient refusal is not permanent.
+    std::string failedWindow_; int64_t failedAt_ = 0;
+    bool Refused(const std::string& uuid) const { return uuid == failedWindow_ && CaptureClockUs() - failedAt_ < 30000000; }
     pw_stream* stream_ = nullptr;
     spa_video_info_raw format_{};
     int64_t lastFrame_ = -1000000;
@@ -180,8 +182,8 @@ class PipeWireVideo final : public VideoSource {
             bool onWindow = false, useKWin = kwin->Connect();
             if (useKWin) {
                 const auto uuid = kwin->WindowForPid(targetPid);
-                onWindow = !uuid.empty() && uuid != failedWindow_ && kwin->StreamWindow(uuid);
-                if (!uuid.empty() && !onWindow) failedWindow_ = uuid;
+                onWindow = !uuid.empty() && !Refused(uuid) && kwin->StreamWindow(uuid);
+                if (!uuid.empty() && !onWindow && !Refused(uuid)) { failedWindow_ = uuid; failedAt_ = CaptureClockUs(); }
                 if (!onWindow) {
                     if (!uuid.empty()) { kwin = std::make_unique<KWinScreencast>(); useKWin = kwin->Connect(); }
                     useKWin = useKWin && kwin->StreamOutput(display_);
@@ -231,13 +233,16 @@ class PipeWireVideo final : public VideoSource {
                 int64_t lastTargetCheck = CaptureClockUs();
                 while (running_ && !ended_) {
                     pw_loop_iterate(pw_main_loop_get_loop(loop), 50);
-                    if (kwin && !kwin->Pump()) ended_ = true;  // the window closed
+                    if (kwin && !kwin->Pump()) {  // the window closed, or KWin went away
+                        if (!kwin->Error().empty()) { std::lock_guard lock(mutex_); error_ = kwin->Error(); }
+                        ended_ = true;
+                    }
                     // Follow the game: switch when the target changes or its window appears.
                     if (kwin && CaptureClockUs() - lastTargetCheck > 1000000) {
                         lastTargetCheck = CaptureClockUs();
                         const uint32_t wanted = CaptureWindowPid();
                         const auto uuid = wanted && !onWindow ? kwin->WindowForPid(wanted) : std::string{};
-                        if (wanted != targetPid || (!uuid.empty() && uuid != failedWindow_)) {
+                        if (wanted != targetPid || (!uuid.empty() && !Refused(uuid))) {
                             retarget_ = true; break;
                         }
                     }
