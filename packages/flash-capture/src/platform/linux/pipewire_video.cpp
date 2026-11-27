@@ -22,7 +22,7 @@ class PipeWireVideo final : public VideoSource {
     std::atomic<bool> running_{false}, healthy_{false};
     std::atomic<bool> pending_{false};
     std::atomic<bool> ended_{false}, connected_{false}, producedFrame_{false};
-    std::atomic<bool> shmRequested_{false};
+    std::atomic<bool> shmRequested_{false}, tiled_{false};
     std::thread thread_;
     GCancellable* cancel_ = g_cancellable_new();
     mutable std::mutex mutex_;
@@ -42,14 +42,14 @@ class PipeWireVideo final : public VideoSource {
     FrameData latest_{};
     std::vector<uint8_t> converted_;
 
-    // SHM only for now. DMA-BUF import needs modifiers, fences and encoder-owned
-    // surfaces (L2); if a server sends DMA-BUF anyway, ask for SHM again.
+    // SHM, or DMA-BUF that PipeWire maps for us when it is LINEAR. Tiled
+    // DMA-BUF import needs fences and encoder-owned surfaces (L2).
     void RequestBuffers() {
         if (!stream_) return;
         uint8_t bytes[256]; auto builder = SPA_POD_BUILDER_INIT(bytes, sizeof(bytes));
         const spa_pod* params[] = {static_cast<spa_pod*>(spa_pod_builder_add_object(&builder,
             SPA_TYPE_OBJECT_ParamBuffers, SPA_PARAM_Buffers,
-            SPA_PARAM_BUFFERS_dataType, SPA_POD_CHOICE_FLAGS_Int((1 << SPA_DATA_MemFd) | (1 << SPA_DATA_MemPtr))))};
+            SPA_PARAM_BUFFERS_dataType, SPA_POD_CHOICE_FLAGS_Int((1 << SPA_DATA_MemFd) | (1 << SPA_DATA_MemPtr) | (1 << SPA_DATA_DmaBuf))))};
         pw_stream_update_params(stream_, params, 1);
     }
     static void Format(void* data, uint32_t id, const spa_pod* pod) {
@@ -141,7 +141,13 @@ class PipeWireVideo final : public VideoSource {
         const auto now = CaptureClockUs();
         if (b->n_datas && self.format_.size.width && self.format_.size.height && now - self.lastFrame_ >= 1000000 / self.fps_) {
             const auto& plane = b->datas[0];
-            if (plane.type != SPA_DATA_MemFd && plane.type != SPA_DATA_MemPtr) {
+            // A GPU-tiled buffer (NVIDIA block-linear, Intel/AMD tiling) is not a
+            // plain image: copying it as rows gives scrambled stripes. Drop it.
+            const bool tiled = (self.format_.flags & SPA_VIDEO_FLAG_MODIFIER) && self.format_.modifier != 0;
+            const bool mappedDmaBuf = plane.type == SPA_DATA_DmaBuf && plane.data && !tiled;
+            if (tiled) {
+                self.tiled_ = true;  // the session loop falls back to the screen
+            } else if (plane.type != SPA_DATA_MemFd && plane.type != SPA_DATA_MemPtr && !mappedDmaBuf) {
                 // The server ignored the SHM request. Re-ask once; the next
                 // buffers should arrive as memfd or mapped memory.
                 if (!self.shmRequested_.exchange(true)) self.RequestBuffers();
@@ -173,15 +179,16 @@ class PipeWireVideo final : public VideoSource {
     bool Session() {
         pw_main_loop* loop = nullptr; pw_context* pwContext = nullptr; pw_core* core = nullptr;
         spa_hook listener{}; bool attached = false; bool retry = false;
-        ended_ = false; connected_ = false; producedFrame_ = false; shmRequested_ = false;
+        ended_ = false; connected_ = false; producedFrame_ = false; shmRequested_ = false; tiled_ = false;
         {
             PortalSession portal;
             // KDE: the game window (or the chosen monitor) straight from KWin, no dialog.
             auto kwin = std::make_unique<KWinScreencast>();
             const uint32_t targetPid = CaptureWindowPid();
             bool onWindow = false, useKWin = kwin->Connect();
+            std::string windowUuid;
             if (useKWin) {
-                const auto uuid = kwin->WindowForPid(targetPid);
+                const auto uuid = kwin->WindowForPid(targetPid); windowUuid = uuid;
                 onWindow = !uuid.empty() && !Refused(uuid) && kwin->StreamWindow(uuid);
                 if (!uuid.empty() && !onWindow && !Refused(uuid)) { failedWindow_ = uuid; failedAt_ = CaptureClockUs(); }
                 if (!onWindow) {
@@ -209,30 +216,43 @@ class PipeWireVideo final : public VideoSource {
                 static const pw_stream_events events = [] { pw_stream_events e{}; e.version = PW_VERSION_STREAM_EVENTS;
                     e.state_changed = State; e.param_changed = Format; e.process = Process; return e; }();
                 pw_stream_add_listener(stream_, &listener, &events, this); attached = true;
-                uint8_t bytes[2048]; auto builder = SPA_POD_BUILDER_INIT(bytes, sizeof(bytes));
+                uint8_t bytes[4096]; auto builder = SPA_POD_BUILDER_INIT(bytes, sizeof(bytes));
                 spa_video_info_raw info{};
                 // Ask for the formats a screencast backend can plausibly send,
                 // in order of what is cheapest to hand to the encoder. NV12 is
                 // converted above; the rest are already packed BGRx/RGBx.
                 const enum spa_video_format formats[] = {SPA_VIDEO_FORMAT_BGRx, SPA_VIDEO_FORMAT_BGRA,
                     SPA_VIDEO_FORMAT_RGBx, SPA_VIDEO_FORMAT_RGBA, SPA_VIDEO_FORMAT_NV12};
-                const spa_pod* params[sizeof(formats) / sizeof(formats[0])];
-                for (size_t i = 0; i < sizeof(formats) / sizeof(formats[0]); ++i) {
-                    info.format = formats[i];
-                    params[i] = spa_format_video_raw_build(&builder, SPA_PARAM_EnumFormat, &info);
+                // Packed formats are offered first with the LINEAR modifier: KWin
+                // otherwise picks the GPU's tiled layout for window streams
+                // (seen on NVIDIA), which the CPU path cannot read. Then every
+                // format without a modifier, for SHM-only servers.
+                constexpr size_t formatCount = sizeof(formats) / sizeof(formats[0]);
+                const spa_pod* params[formatCount * 2 - 1];
+                size_t paramCount = 0;
+                for (size_t i = 0; i + 1 < formatCount; ++i) {
+                    info = {}; info.format = formats[i]; info.flags = SPA_VIDEO_FLAG_MODIFIER; info.modifier = 0;
+                    params[paramCount++] = spa_format_video_raw_build(&builder, SPA_PARAM_EnumFormat, &info);
+                }
+                for (size_t i = 0; i < formatCount; ++i) {
+                    info = {}; info.format = formats[i];
+                    params[paramCount++] = spa_format_video_raw_build(&builder, SPA_PARAM_EnumFormat, &info);
                 }
                 // L1 uses mapped SHM with CPU conversion. L2 must negotiate
                 // modifiers and import DMA-BUF planes into encoder-owned NV12
                 // surfaces, preserving acquire/release fences and buffer lifetime.
                 if (pw_stream_connect(stream_, PW_DIRECTION_INPUT, serial.empty() ? portal.node : PW_ID_ANY,
                     static_cast<pw_stream_flags>(PW_STREAM_FLAG_AUTOCONNECT | PW_STREAM_FLAG_MAP_BUFFERS),
-                    params, sizeof(params) / sizeof(params[0])) < 0)
+                    params, paramCount) < 0)
                     throw std::runtime_error("Could not connect video stream");
                 pending_ = false;
                 lastFrame_ = CaptureClockUs();
                 int64_t lastTargetCheck = CaptureClockUs();
                 while (running_ && !ended_) {
                     pw_loop_iterate(pw_main_loop_get_loop(loop), 50);
+                    // Tiled frames can't be read on the CPU: treat the window as refused
+                    // and record the screen instead (retried after 30 s).
+                    if (tiled_ && onWindow) { failedWindow_ = windowUuid; failedAt_ = CaptureClockUs(); retarget_ = true; break; }
                     if (kwin && !kwin->Pump()) {  // the window closed, or KWin went away
                         if (!kwin->Error().empty()) { std::lock_guard lock(mutex_); error_ = kwin->Error(); }
                         ended_ = true;
