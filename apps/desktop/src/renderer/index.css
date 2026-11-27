@@ -296,6 +296,10 @@ html, body {
 .field:hover { border-color: color-mix(in srgb, var(--edge) 50%, var(--muted)); }
 .field:focus { border-color: var(--line-strong); }
 
+/* Library search widens while it is in use or holds a query. */
+.field.search { width: 180px; transition: width 220ms var(--ease-out), border-color 120ms; }
+.field.search:focus, .field.search:not(:placeholder-shown) { width: min(340px, 22vw); }
+
 .keycap {
   display: inline-flex;
   align-items: center;

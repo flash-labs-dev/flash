@@ -114,17 +114,20 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
     <div className="flex-1 flex flex-col min-h-0">
       {/* Filter strip: what you are looking at on the left, how it is ordered on the right. */}
       <div className="flex items-center gap-3 shrink-0" style={{ height: 56, padding: '0 16px', borderBottom: '1px solid var(--edge-soft)' }}>
-        <div className="flex items-center gap-5 min-w-0 flex-1 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
-          {games.length === 0 ? (
-            <span className="caps" style={{ color: 'var(--muted-3)' }}>No games yet</span>
-          ) : games.map(game => (
-            <button key={game.name} className="tab" aria-pressed={gameFilter === game.name}
-              onClick={() => setGameFilter(game.name)}>
-              {game.name} <span className="count">{game.count}</span>
-            </button>
-          ))}
+        <div className="flex items-center gap-5 min-w-0 flex-1">
+          {/* Only the game tabs scroll, so Starred stays in reach while the search field is wide. */}
+          <div className="flex items-center gap-5 min-w-0 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+            {games.length === 0 ? (
+              <span className="caps" style={{ color: 'var(--muted-3)' }}>No games yet</span>
+            ) : games.map(game => (
+              <button key={game.name} className="tab" aria-pressed={gameFilter === game.name}
+                onClick={() => setGameFilter(game.name)}>
+                {game.name} <span className="count">{game.count}</span>
+              </button>
+            ))}
+          </div>
           <span aria-hidden="true" style={{ width: 1, height: 16, background: 'var(--edge)', flexShrink: 0 }} />
-          <button className="tab" aria-pressed={starredOnly} onClick={() => setStarredOnly(!starredOnly)}
+          <button className="tab shrink-0" aria-pressed={starredOnly} onClick={() => setStarredOnly(!starredOnly)}
             style={{ alignItems: 'center' }}>
             <span style={{ display: 'flex', color: starredOnly ? 'var(--accent)' : 'inherit' }}>
               <Icon name="star" size={13} filled={starredOnly} strokeWidth={2} />
@@ -168,8 +171,8 @@ export function LibraryView({ clips, games, gameFilter, setGameFilter, starredOn
                 onQueryChange('')
                 event.currentTarget.blur()
               }}
-              className="field"
-              style={{ width: 180, paddingLeft: 32, height: 32 }}
+              className="field search"
+              style={{ paddingLeft: 32, height: 32 }}
             />
           </label>
         </div>

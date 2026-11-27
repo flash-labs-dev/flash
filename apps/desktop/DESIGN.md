@@ -277,6 +277,7 @@ A vertical stack on Watch's right edge: one 30px outlined glyph (1.4 stroke) per
 ### Inputs / Fields
 - **Style:** hairline field, transparent, 1px edge stroke, 6px radius, 34px (search 32px), 12px text, ash-3 placeholder; over footage it takes a 50% black fill.
 - **Focus:** border strengthens to 70% white; caret is the accent.
+- **Library search:** 180px at rest, 340px (capped at 22vw) while focused or holding a query (220ms ease-out).
 - **Hover:** border moves halfway toward ash.
 - **Hotkey capture:** a 32px tabular button; listening shows a glass fill and white border, a key owned by another program shows alert text and border.
 - **Error:** 12px alert text beneath.
