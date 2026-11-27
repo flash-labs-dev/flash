@@ -48,7 +48,9 @@ fn snapshot() -> Vec<Process> {
         let path = fs::read_link(format!("{dir}/exe")).ok();
         let base = path.as_ref().and_then(|p| p.file_name()).map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_else(|| read(format!("{dir}/comm")).trim().to_owned());
-        let exe = game_executable(&base, &cmdline);
+        let mut exe = game_executable(&base, &cmdline);
+        // Minecraft Java runs as plain `java`; its arguments name it.
+        if matches!(exe.as_str(), "java" | "javaw") && cmdline.to_lowercase().contains("minecraft") { exe = "minecraft-java".into() }
         if exe.is_empty() { return None }
         let stat = read(format!("{dir}/stat"));
         let fields: Vec<&str> = stat.rsplit_once(')').map_or("", |(_, rest)| rest).split_whitespace().collect();
@@ -64,9 +66,13 @@ pub struct Detector { db: HashMap<String, String>, pub current: Option<Game> }
 impl Detector {
     pub fn new() -> Detector {
         let raw: Value = serde_json::from_str(include_str!("../../../../packages/flash-detector/src/games.json")).unwrap_or_default();
-        let db = raw["games"].as_array().into_iter().flatten().filter_map(|g| {
+        let mut db: HashMap<String, String> = raw["games"].as_array().into_iter().flatten().filter_map(|g| {
             Some((g["processName"].as_str()?.to_lowercase(), g["displayName"].as_str()?.to_owned()))
         }).collect();
+        // Linux names for games the shared (Windows) list knows by another process name.
+        for (process, name) in [("sober", "Roblox"), ("minecraft-java", "Minecraft"), ("among us.exe", "Among Us")] {
+            db.insert(process.into(), name.into());
+        }
         Detector { db, current: None }
     }
 
@@ -84,10 +90,47 @@ impl Detector {
             let (p, name) = &matches[0];
             return Some(Game { name: name.clone(), pid: p.pid });
         }
-        // Nothing known: a Steam game is still a game, named by its app id.
+        // Nothing known: a Steam game is still a game, named from its install manifest.
+        let apps = steam_apps();
         processes.iter().filter(|p| !p.steam_app.is_empty() && !is_infrastructure(&p.exe))
-            .max_by_key(|p| p.rss).map(|p| Game { name: format!("Steam {}", p.steam_app), pid: p.pid })
+            .filter_map(|p| match apps.get(&p.steam_app) {
+                Some(name) if is_steam_tool(name) => None,
+                Some(name) => Some((p, name.clone())),
+                None => Some((p, format!("Steam {}", p.steam_app))),
+            })
+            .max_by_key(|(p, _)| p.rss).map(|(p, name)| Game { name, pid: p.pid })
     }
+}
+
+/// Steam apps that run with an app id but are not games.
+fn is_steam_tool(name: &str) -> bool {
+    ["Wallpaper Engine", "OBS Studio", "Proton", "Steam Linux Runtime", "Steamworks"].iter().any(|t| name.starts_with(t))
+}
+
+fn home() -> std::path::PathBuf { std::path::PathBuf::from(std::env::var_os("HOME").unwrap_or_default()) }
+
+/// Every Steam library folder, from each Steam install's libraryfolders.vdf.
+pub fn steam_libraries() -> Vec<std::path::PathBuf> {
+    let mut libs: Vec<std::path::PathBuf> = vec![];
+    for root in [home().join(".local/share/Steam"), home().join(".steam/steam"), home().join(".var/app/com.valvesoftware.Steam/.local/share/Steam")] {
+        let vdf = fs::read_to_string(root.join("steamapps/libraryfolders.vdf")).unwrap_or_default();
+        let paths = vdf.lines().filter_map(|l| l.trim().strip_prefix("\"path\"")).map(|v| v.trim().trim_matches('"').replace("\\\\", "\\"));
+        for lib in std::iter::once(root.clone()).chain(paths.map(Into::into)) {
+            let lib = fs::canonicalize(&lib).unwrap_or(lib);
+            if lib.join("steamapps").is_dir() && !libs.contains(&lib) { libs.push(lib) }
+        }
+    }
+    libs
+}
+
+/// Installed Steam apps: app id -> name.
+pub fn steam_apps() -> HashMap<String, String> {
+    steam_libraries().iter().flat_map(|lib| fs::read_dir(lib.join("steamapps")).into_iter().flatten().flatten()).filter_map(|entry| {
+        let file = entry.file_name().to_string_lossy().into_owned();
+        let id = file.strip_prefix("appmanifest_")?.strip_suffix(".acf")?.to_owned();
+        let text = fs::read_to_string(entry.path()).ok()?;
+        Some((id, text.lines().find_map(|l| l.trim().strip_prefix("\"name\""))?.trim().trim_matches('"').to_owned()))
+    }).collect()
 }
 
 #[cfg(test)]
@@ -101,6 +144,8 @@ mod tests {
         assert_eq!(steam_app_id("A=1\0SteamAppId=252950\0", ""), "252950");
         assert_eq!(steam_app_id("", "/home/u/.steam/steamapps/compatdata/730/pfx"), "730");
         assert_eq!(steam_app_id("SteamAppId=0", ""), "");
-        assert!(Detector::new().db.contains_key("cs2.exe"));
+        let db = Detector::new().db;
+        assert!(db.contains_key("cs2.exe") && db["sober"] == "Roblox" && db["minecraft-java"] == "Minecraft");
+        assert!(is_steam_tool("Wallpaper Engine") && !is_steam_tool("Schedule I"));
     }
 }

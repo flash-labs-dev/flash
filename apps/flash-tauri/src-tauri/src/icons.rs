@@ -31,7 +31,10 @@ fn find(game: &str, wanted: &str) -> Option<PathBuf> {
     if let Some(id) = game.strip_prefix("Steam ").filter(|id| id.chars().all(|c| c.is_ascii_digit())) {
         if let Some(icon) = steam_icon(id) { return Some(icon) }
     }
+    // Games played through a launcher show the launcher's icon.
+    let launchers: &[&str] = match wanted { "roblox" => &["sober", "roblox"], "minecraft" => &["prismlauncher", "oneclient", "minecraftlauncher", "multimc"], _ => &[] };
     heroic(wanted).or_else(|| steam(wanted)).or_else(|| desktop_entry(wanted))
+        .or_else(|| launchers.iter().find_map(|l| desktop_entry(l)))
 }
 
 fn heroic(wanted: &str) -> Option<PathBuf> {
@@ -64,17 +67,7 @@ fn steam_roots() -> Vec<PathBuf> {
 }
 
 fn steam(wanted: &str) -> Option<PathBuf> {
-    for root in steam_roots() {
-        let Ok(entries) = fs::read_dir(root.join("steamapps")) else { continue };
-        for entry in entries.flatten() {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let Some(id) = name.strip_prefix("appmanifest_").and_then(|n| n.strip_suffix(".acf")) else { continue };
-            let text = fs::read_to_string(entry.path()).unwrap_or_default();
-            let title = text.lines().find_map(|l| l.trim().strip_prefix("\"name\"")).map(|v| v.trim().trim_matches('"').to_owned());
-            if title.as_deref().map(key).as_deref() == Some(wanted) { return steam_icon(id) }
-        }
-    }
-    None
+    crate::detect::steam_apps().into_iter().find(|(_, name)| key(name) == wanted).and_then(|(id, _)| steam_icon(&id))
 }
 
 /// Steam writes steam_icon_<id>.png into the icon theme for desktop shortcuts,
@@ -111,11 +104,16 @@ fn desktop_entry(wanted: &str) -> Option<PathBuf> {
 
 /// The largest PNG of `name` in the hicolor theme, then pixmaps.
 fn theme_icon(name: &str) -> Option<PathBuf> {
-    for base in [home().join(".local/share/icons/hicolor"), PathBuf::from("/usr/share/icons/hicolor")] {
+    for base in [home().join(".local/share/icons/hicolor"), PathBuf::from("/usr/share/icons/hicolor"),
+        home().join(".local/share/flatpak/exports/share/icons/hicolor"), PathBuf::from("/var/lib/flatpak/exports/share/icons/hicolor")] {
         for size in ["512x512", "256x256", "128x128", "96x96", "64x64", "48x48", "32x32"] {
             let path = base.join(size).join("apps").join(format!("{name}.png"));
             if path.is_file() { return Some(path) }
         }
+    }
+    for base in [home().join(".local/share/flatpak/exports/share/icons/hicolor"), PathBuf::from("/var/lib/flatpak/exports/share/icons/hicolor"), PathBuf::from("/usr/share/icons/hicolor")] {
+        let path = base.join("scalable/apps").join(format!("{name}.svg"));
+        if path.is_file() { return Some(path) }
     }
     Some(PathBuf::from(format!("/usr/share/pixmaps/{name}.png"))).filter(|p| p.is_file())
 }
@@ -156,5 +154,7 @@ mod tests {
 mod local_check {
     #[test]
     #[ignore = "reads this machine's launcher caches"]
-    fn finds_installed_games() { eprintln!("rocket league icon: {:?}", super::lookup("Rocket League").map(|u| u[..40].to_owned())); }
+    fn finds_installed_games() { for game in ["Rocket League", "Among Us", "Roblox", "Minecraft", "Schedule I", "Who's Cheating?"] {
+        eprintln!("{game} icon: {:?}", super::lookup(game).map(|u| u[..30].to_owned()));
+    } }
 }

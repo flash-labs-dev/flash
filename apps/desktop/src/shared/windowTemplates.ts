@@ -5,7 +5,7 @@ function style(theme: string, font: string) {
   return `
     @font-face{font-family:Geist;src:url('${font}') format('woff2');font-weight:100 900;font-display:swap}
     *{margin:0;padding:0;box-sizing:border-box}
-    body{font-family:Geist,system-ui,sans-serif;background:transparent;color:${t.fg};overflow:hidden}
+    body{font-family:Geist,system-ui,sans-serif;background:transparent;color:${t.fg};overflow:hidden;user-select:none;-webkit-user-select:none;cursor:default}
     .surface{background:${t.bg};border:1px solid ${t.edge};border-radius:${WINDOW_TOKENS.popover}px}
     .label{font-size:11px;font-weight:600}
     .dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;background:${t.accent}}
