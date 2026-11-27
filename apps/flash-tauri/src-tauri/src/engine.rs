@@ -50,7 +50,8 @@ pub fn quality(name: &str) -> Quality {
     }
     let effective_fps = if fps > 60 { 60.0 * (fps as f64 / 60.0).powf(0.45) } else { fps as f64 };
     let pixels = height as f64 * (height as f64 * 16.0 / 9.0);
-    let bits_per_pixel = 0.08 * (pixels / (1080.0 * 1920.0)).powf(-0.1);
+    // Linux runs at 60% of Windows' 0.08 bpp so short clips fit Discord's 10 MB upload limit.
+    let bits_per_pixel = 0.048 * (pixels / (1080.0 * 1920.0)).powf(-0.1);
     Quality { height, fps, bitrate_kbps: (pixels * effective_fps * bits_per_pixel / 1000.0).round() as u32 }
 }
 
@@ -90,7 +91,7 @@ mod tests {
         let q = quality("1440p 120fps"); assert_eq!((q.height, q.fps), (1440, 120));
         let q = quality("4K 30fps"); assert_eq!((q.height, q.fps), (2160, 30));
         let q = quality("nonsense"); assert_eq!((q.height, q.fps), (1080, 60));
-        // Same numbers as main.ts's parseQuality: 1080p60 = 1920x1080 x 60 x 0.08 bpp.
-        assert_eq!(quality("1080p 60fps").bitrate_kbps, 9953);
+        // 1080p60 = 1920x1080 x 60 x 0.048 bpp, about 6 Mbps (Windows uses 0.08).
+        assert_eq!(quality("1080p 60fps").bitrate_kbps, 5972);
     }
 }
