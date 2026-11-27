@@ -534,3 +534,12 @@ html, body {
 .corner-picker [data-corner='top-right'] { top: 6px; right: 6px; }
 .corner-picker [data-corner='bottom-left'] { bottom: 6px; left: 6px; }
 .corner-picker [data-corner='bottom-right'] { bottom: 6px; right: 6px; }
+
+/* Viewer: prev/next arrows and the clip count sit on the video and show on hover. */
+.viewer-nav { position: absolute; top: 50%; z-index: 5; width: 40px; height: 40px; margin-top: -20px; display: flex; align-items: center; justify-content: center;
+  border-radius: 99px; color: #fff; background: rgba(0,0,0,.45); backdrop-filter: blur(8px); border: 1px solid rgba(255,255,255,.12);
+  opacity: 0; transition: opacity 160ms, background 120ms, transform 120ms; cursor: pointer; }
+.viewer-nav:hover { background: rgba(0,0,0,.7); transform: scale(1.06); }
+.viewer-count { position: absolute; top: 12px; right: 12px; z-index: 5; padding: 3px 9px; border-radius: 99px; font-size: 12px; color: #fff;
+  background: rgba(0,0,0,.45); backdrop-filter: blur(8px); opacity: 0; transition: opacity 160ms; pointer-events: none; }
+.viewer-player:hover .viewer-nav, .viewer-player:hover .viewer-count, .viewer-nav:focus-visible { opacity: 1; }

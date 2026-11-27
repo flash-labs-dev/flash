@@ -166,7 +166,7 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
   )
 
   return (
-    <div className="absolute flex" style={{ inset: 0, padding: 24, gap: 24 }}>
+    <div className="absolute flex" style={{ inset: 0, padding: 16, gap: 16 }}>
       {link && (
         <div role="dialog" aria-label="Clip link" className="absolute inset-0 flex items-center justify-center"
           style={{ zIndex: 50, background: 'rgba(0,0,0,0.6)' }} onClick={() => setLink(null)}>
@@ -191,17 +191,24 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
               {filterLabel}<button className="btn btn-sm" onClick={onClearFilters}>Show all</button>
             </span>
           )}
-          <span className="ml-auto flex items-center tabular" style={{ gap: 10, fontSize: 12, color: 'var(--text-faint, var(--muted))' }}>
-            <span className="chip-key">←</span><span className="chip-key">→</span> switch clips
-            <span style={{ marginLeft: 8 }}>{index + 1} of {clips.length}</span>
-          </span>
         </div>
 
-        <div className="relative flex-1 min-h-0 flex flex-col overflow-hidden" style={{ borderRadius: 8, background: '#000', border: '1px solid var(--border-subtle, var(--edge))' }}>
-          <div className="relative flex-1 min-h-0 flex items-center justify-center" onClick={isShot ? undefined : toggle} style={{ cursor: isShot ? 'default' : 'pointer' }}>
+        {/* The player keeps the clip's 16:9 shape, so the video fills it with no black bars. */}
+        <div className="flex-1 min-h-0 flex items-center justify-center">
+        <div className="viewer-player relative flex flex-col overflow-hidden" style={{ width: '100%', maxHeight: '100%', borderRadius: 10, background: '#000', border: '1px solid var(--border-subtle, var(--edge))' }}>
+          <div className="relative flex items-center justify-center" onClick={isShot ? undefined : toggle} style={{ aspectRatio: '16 / 9', minHeight: 0, flexShrink: 1, cursor: isShot ? 'default' : 'pointer' }}>
+            {clips.length > 1 && <span className="viewer-count tabular">{index + 1} / {clips.length}</span>}
+            {index > 0 && (
+              <button className="viewer-nav" style={{ left: 12 }} aria-label="Previous clip" title="Previous clip (←)"
+                onClick={e => { e.stopPropagation(); go(-1) }}><Icon name="left" size={20} /></button>
+            )}
+            {index < clips.length - 1 && (
+              <button className="viewer-nav" style={{ right: 12 }} aria-label="Next clip" title="Next clip (→)"
+                onClick={e => { e.stopPropagation(); go(1) }}><span style={{ display: 'flex', transform: 'scaleX(-1)' }}><Icon name="left" size={20} /></span></button>
+            )}
             {isShot
-              ? <img src={src} alt={clip.title} className="max-w-full max-h-full object-contain" />
-              : <video key={clip.filePath} ref={videoRef} src={src} autoPlay playsInline className="max-w-full max-h-full"
+              ? <img src={src} alt={clip.title} className="w-full h-full object-contain" />
+              : <video key={clip.filePath} ref={videoRef} src={src} autoPlay playsInline className="w-full h-full object-contain"
                   onPlay={() => setPlaying(true)} onPause={() => setPlaying(false)}
                   onTimeUpdate={e => setTime(e.currentTarget.currentTime)}
                   onLoadedMetadata={e => setDuration(e.currentTarget.duration)}
@@ -220,9 +227,10 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
             </div>
           )}
         </div>
+        </div>
       </div>
 
-      <aside className="flex flex-col shrink-0 overflow-y-auto" style={{ width: 340, gap: 18, padding: 20, borderRadius: 8, background: 'var(--panel)', border: '1px solid var(--border-subtle, var(--edge))' }}>
+      <aside className="flex flex-col shrink-0 overflow-y-auto" style={{ width: 288, gap: 18, padding: 20, borderRadius: 8, background: 'var(--panel)', border: '1px solid var(--border-subtle, var(--edge))' }}>
         <div className="flex flex-col" style={{ gap: 6 }}>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>Title</span>
           <RenameTitle title={clip.title} display={clipDisplayTitle(clip.title)} onCommit={name => onRename(clip, name)} style={{ fontSize: 18, fontWeight: 600, color: 'var(--fg)', lineHeight: 1.3 }} />
