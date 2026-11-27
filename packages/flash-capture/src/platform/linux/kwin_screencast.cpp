@@ -224,11 +224,12 @@ const std::string& KWinScreencast::Error() const { return impl_->error; }
 bool KWinScreencast::Pump() {
     // Non-blocking: read whatever KWin sent, so a closed window ends the session.
     auto* display = impl_->display;
-    if (!PrepareRead(display)) return false;
-    wl_display_flush(display);
-    pollfd fd{wl_display_get_fd(display), POLLIN, 0};
-    if (poll(&fd, 1, 0) > 0) wl_display_read_events(display); else wl_display_cancel_read(display);
-    if (wl_display_dispatch_pending(display) < 0) return false;
+    const bool alive = PrepareRead(display) && (wl_display_flush(display), true) && [&] {
+        pollfd fd{wl_display_get_fd(display), POLLIN, 0};
+        if (poll(&fd, 1, 0) > 0) wl_display_read_events(display); else wl_display_cancel_read(display);
+        return wl_display_dispatch_pending(display) >= 0;
+    }();
+    if (!alive) { impl_->error = "Lost the KWin connection"; return false; }
     return !impl_->closed;
 }
 
