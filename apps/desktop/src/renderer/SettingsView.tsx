@@ -72,7 +72,7 @@ function qualityFps(quality: string): number {
   return match ? Number(match[1]) : 0
 }
 
-const SECTIONS = ['Capture', 'Voice', 'Games', 'Overlay', 'Storage'] as const
+const SECTIONS = ['Capture', 'Voice', 'Games', 'Notifications', 'Storage'] as const
 
 // ── Pieces ────────────────────────────────────────────────────────────────────
 
@@ -82,10 +82,10 @@ const SECTIONS = ['Capture', 'Voice', 'Games', 'Overlay', 'Storage'] as const
 // Anything holding its own state below a Row lost it on that tick.
 function Row({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-6" style={{ padding: '16px 0', borderBottom: '1px solid var(--edge-soft)' }}>
+    <div className="settings-row flex items-center justify-between gap-6">
       <div className="min-w-0">
-        <div style={{ fontSize: 14, color: 'var(--fg)' }}>{label}</div>
-        {hint && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>{hint}</div>}
+        <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--fg)' }}>{label}</div>
+        {hint && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.45 }}>{hint}</div>}
       </div>
       <div className="shrink-0 flex items-center gap-3">{children}</div>
     </div>
@@ -205,18 +205,18 @@ function AppAudio({ lanes, onChange }: {
   )
 }
 
-function Section({ id, title, children, sectionRef }: {
+function Section({ id, title, description, children, sectionRef }: {
   id: string
   title: string
+  description?: string
   children: React.ReactNode
   sectionRef: (node: HTMLElement | null) => void
 }) {
   return (
-    <section id={`settings-${id}`} ref={sectionRef} aria-labelledby={`settings-${id}-title`} style={{ paddingTop: 48 }}>
-      <h2 id={`settings-${id}-title`} className="display" style={{ fontSize: 40, color: 'var(--fg)', paddingBottom: 14, borderBottom: '1px solid var(--line)' }}>
-        {title}
-      </h2>
-      {children}
+    <section id={`settings-${id}`} ref={sectionRef} aria-labelledby={`settings-${id}-title`} style={{ paddingTop: 32, scrollMarginTop: 8 }}>
+      <h2 id={`settings-${id}-title`} style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{title}</h2>
+      {description && <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{description}</p>}
+      <div className="settings-panel" style={{ marginTop: 12 }}>{children}</div>
     </section>
   )
 }
@@ -428,14 +428,14 @@ export function SettingsView({ settings, onChange, storage, encoder, captureBack
   const register = (id: string) => (node: HTMLElement | null) => { sectionNodes.current[id] = node }
 
   return (
-    <div ref={scroller} className="flex-1 overflow-y-auto grain">
-      <div className="flex mx-auto" style={{ maxWidth: 1080, padding: '0 40px 96px', gap: 64 }}>
-        <nav aria-label="Settings sections" className="shrink-0" style={{ width: 168, position: 'sticky', top: 0, alignSelf: 'flex-start', paddingTop: 56 }}>
-          <h1 className="display" style={{ fontSize: 56, color: 'var(--fg)', marginBottom: 28 }}>Settings</h1>
-          <ul className="flex flex-col" style={{ gap: 4 }}>
+    <div ref={scroller} className="flex-1 overflow-y-auto">
+      <div className="flex" style={{ maxWidth: 1100, padding: '0 32px 96px', gap: 40 }}>
+        <nav aria-label="Settings sections" className="shrink-0" style={{ width: 200, position: 'sticky', top: 0, alignSelf: 'flex-start', paddingTop: 28 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--fg)', marginBottom: 16 }}>Settings</h1>
+          <ul className="flex flex-col" style={{ gap: 2 }}>
             {SECTIONS.map(section => (
               <li key={section}>
-                <button className="tab" aria-current={current === section ? 'page' : undefined}
+                <button className="settings-nav" aria-current={current === section ? 'page' : undefined}
                   onClick={() => sectionNodes.current[section]?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
                   {section}
                 </button>
@@ -444,7 +444,7 @@ export function SettingsView({ settings, onChange, storage, encoder, captureBack
           </ul>
         </nav>
 
-        <div className="flex-1 min-w-0" style={{ paddingTop: 8 }}>
+        <div className="flex-1 min-w-0" style={{ maxWidth: 820 }}>
           <Section id="Capture" title="Capture" sectionRef={register('Capture')}>
             <Row label="Clip hotkey" hint={`Saves the full ${settings.bufferLength} seconds.`}>
               <HotkeyInput label="Clip hotkey" value={settings.hotkey} registered={hotkeysRegistered.clip}
@@ -620,35 +620,28 @@ export function SettingsView({ settings, onChange, storage, encoder, captureBack
             )}
           </Section>
 
-          <Section id="Overlay" title="Overlay" sectionRef={register('Overlay')}>
-            <Row label="Clip saved notification">
+          <Section id="Notifications" title="Notifications" description="What Flash shows when a clip is saved." sectionRef={register('Notifications')}>
+            <Row label="Clip saved notification" hint="A small card with a sound when a clip is saved.">
               <Toggle label="Clip saved notification" on={settings.notifications} onChange={() => onChange({ notifications: !settings.notifications })} />
+            </Row>
+            <Row label="Notification corner" hint="Where the clip saved card appears. The in-game overlay uses the same corner.">
+              <div className="corner-picker" role="radiogroup" aria-label="Notification corner">
+                {([['top-left', 'Top left'], ['top-right', 'Top right'], ['bottom-left', 'Bottom left'], ['bottom-right', 'Bottom right']] as const).map(([value, label]) => (
+                  <button key={value} role="radio" aria-checked={settings.overlayPosition === value} aria-label={label} title={label}
+                    onClick={() => onChange({ overlayPosition: value })} data-corner={value} />
+                ))}
+              </div>
             </Row>
             <Row label="In-game overlay"
               hint="Shows recording status over borderless and windowed games. It never hooks the game, so it is safe with anti-cheat, but it cannot draw over exclusive fullscreen.">
               <Toggle label="In-game overlay" on={settings.overlay} onChange={() => onChange({ overlay: !settings.overlay })} />
             </Row>
-            {settings.overlay && (
-              <Row label="Overlay corner">
-                <Dropdown
-                  value={settings.overlayPosition}
-                  onChange={overlayPosition => onChange({ overlayPosition: overlayPosition as Settings['overlayPosition'] })}
-                  width={150}
-                  options={[
-                    { value: 'top-left', label: 'Top left' },
-                    { value: 'top-right', label: 'Top right' },
-                    { value: 'bottom-left', label: 'Bottom left' },
-                    { value: 'bottom-right', label: 'Bottom right' },
-                  ]}
-                />
-              </Row>
-            )}
           </Section>
 
           <Section id="Storage" title="Storage" sectionRef={register('Storage')}>
-            <div className="flex items-end gap-4" style={{ padding: '20px 0 8px' }}>
-              <span className="display" style={{ fontSize: 48, color: 'var(--fg)' }}>{formatBytes(storage.used)}</span>
-              <span style={{ fontSize: 13, color: 'var(--muted)', paddingBottom: 6 }}>
+            <div className="settings-row flex items-end gap-3">
+              <span style={{ fontSize: 24, fontWeight: 600, color: 'var(--fg)' }}>{formatBytes(storage.used)}</span>
+              <span style={{ fontSize: 13, color: 'var(--muted)', paddingBottom: 3 }}>
                 across {storage.clips} clip{storage.clips === 1 ? '' : 's'} · MP4 / H.264
               </span>
             </div>

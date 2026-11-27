@@ -107,16 +107,32 @@ export function BoltLogo({ size = 22 }: { size?: number }) {
   )
 }
 
-// The game's initial in a ring: the feed's author mark. There is no game art
-// to show, and a monogram is honest about that.
+// The game's real icon when the backend can find one (launcher caches, Steam,
+// .desktop entries); otherwise its initial on a neutral rounded square.
+const gameIcons = new Map<string, Promise<string | null>>()
+function gameIcon(game: string): Promise<string | null> {
+  let icon = gameIcons.get(game)
+  if (!icon) {
+    icon = (window.flash?.getGameIcon?.(game) ?? Promise.resolve(null)).catch(() => null)
+    gameIcons.set(game, icon)
+  }
+  return icon
+}
+
 export function GameMark({ game, size = 36 }: { game: string; size?: number }) {
+  const [icon, setIcon] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    setIcon(null)
+    gameIcon(game).then(found => { if (live) setIcon(found) })
+    return () => { live = false }
+  }, [game])
+  const radius = Math.max(4, Math.round(size * 0.22))
+  if (icon) return <img src={icon} alt="" aria-hidden="true" className="shrink-0" style={{ width: size, height: size, borderRadius: radius, objectFit: 'cover' }} />
   return (
-    <span aria-hidden="true" className="display flex items-center justify-center shrink-0"
-      style={{
-        width: size, height: size, borderRadius: 999, fontSize: size * 0.5,
-        color: 'var(--fg)', border: '1px solid var(--line)', background: 'rgba(0,0,0,0.35)',
-      }}>
-      {game.trim().charAt(0) || '?'}
+    <span aria-hidden="true" className="flex items-center justify-center shrink-0"
+      style={{ width: size, height: size, borderRadius: radius, fontSize: size * 0.5, fontWeight: 600, color: 'var(--fg)', background: '#2a2a30' }}>
+      {game.trim().charAt(0).toUpperCase() || '?'}
     </span>
   )
 }
@@ -127,16 +143,9 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: () => v
   return (
     <button type="button" role="switch" aria-checked={on} aria-label={label} onClick={onChange}
       className="relative shrink-0 rounded-full transition-colors duration-150"
-      style={{
-        width: 36, height: 20,
-        background: on ? 'var(--accent)' : 'transparent',
-        border: `1px solid ${on ? 'var(--accent)' : 'var(--line)'}`,
-      }}>
+      style={{ width: 44, height: 26, background: on ? 'var(--accent)' : 'var(--edge)' }}>
       <span className="absolute rounded-full transition-all duration-150"
-        style={{
-          top: 3, width: 12, height: 12, left: on ? 19 : 3,
-          background: on ? 'var(--on-accent)' : 'var(--muted)',
-        }} />
+        style={{ top: 3, width: 20, height: 20, left: on ? 21 : 3, background: '#fff', boxShadow: '0 1px 2px rgba(0,0,0,.4)' }} />
     </button>
   )
 }
