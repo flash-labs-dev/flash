@@ -57,13 +57,21 @@ function pageTemplate({ title, meta, expiry = '', videoUrl = '', saveUrl = '', c
     ? `<div class="launch" id="launch" role="dialog" aria-modal="true" aria-labelledby="launch-title" hidden>
   <div class="lcard">
     <img src="/logo.png" alt="">
-    <h2 id="launch-title">Opening in Flashâ€¦</h2>
+    <h2 id="launch-title">Opening in Flash…</h2>
     <p>Launching your Flash app to watch this clip. Feel free to close this tab, or keep watching here.</p>
     <div class="lbar" aria-hidden="true"><i></i></div>
     <label class="lchk"><input id="launch-browser" type="checkbox"> Always watch in browser</label>
     <button class="wbtn" id="launch-watch" type="button">Watch here</button>
   </div>
 </div>`
+    : ''
+
+  // Discord shows this as a Container with a playable video; other sites use the Open Graph tags.
+  // https://docs.discord.com/developers/link-previews/component-embeds.md (3,000 byte limit)
+  const discordEmbed = videoUrl
+    ? `\n<script id="discord:component-embed" type="application/json">${JSON.stringify({
+        component: { type: 17, components: [{ type: 12, items: [{ media: { url: videoUrl } }] }] },
+      }).replaceAll('<', '\\u003c')}</script>`
     : ''
 
   return `<!doctype html>
@@ -79,7 +87,7 @@ function pageTemplate({ title, meta, expiry = '', videoUrl = '', saveUrl = '', c
 <meta property="og:url" content="${safeCanonicalUrl}">${videoMeta}
 <meta name="twitter:title" content="${safeTitle} — Flash">
 <meta name="twitter:image" content="${SITE_ORIGIN}/og.jpg">
-<link rel="canonical" href="${safeCanonicalUrl}">
+<link rel="canonical" href="${safeCanonicalUrl}">${discordEmbed}
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Antonio:wght@500;600;700&display=swap" rel="stylesheet">
@@ -108,7 +116,7 @@ function pageTemplate({ title, meta, expiry = '', videoUrl = '', saveUrl = '', c
   .player { position:relative; overflow:hidden; aspect-ratio:16/9; max-height:calc(100vh - 190px); border:1px solid var(--edge); border-radius:14px; background:#000; box-shadow:0 40px 120px rgba(0,0,0,.6); }
   .player > video { display:block; width:100%; height:100%; object-fit:contain; background:#000; }
   .empty { display:grid; place-items:center; width:100%; height:100%; background:var(--panel); color:var(--edge); font:600 clamp(70px,16vw,190px)/1 var(--display); letter-spacing:.02em; user-select:none; }
-  .unmute { position:absolute; left:16px; bottom:16px; z-index:3; display:flex; align-items:center; gap:8px; height:38px; padding:0 14px; border:1px solid var(--edge); border-radius:999px; background:rgba(10,10,11,.75); color:var(--bone); font:600 11px/1 var(--ui); letter-spacing:.12em; text-transform:uppercase; backdrop-filter:blur(8px); cursor:pointer; }
+  .unmute { position:absolute; left:16px; top:16px; z-index:3; display:flex; align-items:center; gap:8px; height:38px; padding:0 14px; border:1px solid var(--edge); border-radius:999px; background:rgba(10,10,11,.75); color:var(--bone); font:600 11px/1 var(--ui); letter-spacing:.12em; text-transform:uppercase; backdrop-filter:blur(8px); cursor:pointer; }
   .unmute.hide { display:none; }
   .under { display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap; margin-top:18px; }
   .who { display:flex; flex-direction:column; gap:8px; min-width:0; }
@@ -181,12 +189,24 @@ ${launchCard}
   });
 
   if (!phone) {
+    var validAsset = function (asset, pattern) {
+      if (!asset || typeof asset.name !== 'string' || !pattern.test(asset.name)) return false;
+      try {
+        var url = new URL(asset.browser_download_url);
+        return url.origin === 'https://github.com' && url.pathname.startsWith('/flash-labs-dev/flash/releases/download/');
+      } catch (error) { return false; }
+    };
     fetch(releasesUrl, { headers: { Accept: 'application/vnd.github+json' } })
       .then(function (response) { return response.ok ? response.json() : Promise.reject(); })
       .then(function (releases) {
-        var release = releases.filter(function (item) { return !item.draft; })[0];
-        if (!release) return;
-        var asset = release.assets.filter(function (item) { return linux ? /\\.AppImage$/i.test(item.name) : /Setup.*\\.exe$/i.test(item.name); })[0];
+        if (!Array.isArray(releases)) return;
+        var pattern = linux ? /\\.AppImage$/i : /Setup.*\\.exe$/i;
+        var asset;
+        releases.some(function (release) {
+          if (!release || release.draft || !Array.isArray(release.assets)) return false;
+          asset = release.assets.find(function (item) { return validAsset(item, pattern); });
+          return !!asset;
+        });
         if (asset) buttons.forEach(function (button) { button.href = asset.browser_download_url; });
       }).catch(function () {});
   }
@@ -231,11 +251,24 @@ ${launchCard}
   var browserOnly = false;
   try { browserOnly = localStorage.getItem('flashWatchInBrowser') === '1'; } catch (error) {}
   if (launch && launchWatch && launchBrowser && !launchMobile && !browserOnly) {
-    var dismissLaunch = function () { launch.hidden = true; };
+    var previousFocus = document.activeElement;
+    var dismissLaunch = function () {
+      if (launch.hidden) return;
+      launch.hidden = true;
+      if (previousFocus && previousFocus.focus) previousFocus.focus();
+    };
     launch.hidden = false;
     launchWatch.focus();
     launchWatch.addEventListener('click', dismissLaunch);
-    document.addEventListener('keydown', function (event) { if (event.key === 'Escape') dismissLaunch(); });
+    document.addEventListener('keydown', function (event) {
+      if (launch.hidden) return;
+      if (event.key === 'Escape') dismissLaunch();
+      if (event.key === 'Tab' && !event.shiftKey && document.activeElement === launchWatch) {
+        event.preventDefault(); launchBrowser.focus();
+      } else if (event.key === 'Tab' && event.shiftKey && document.activeElement === launchBrowser) {
+        event.preventDefault(); launchWatch.focus();
+      }
+    });
     launchBrowser.addEventListener('change', function () {
       try {
         if (launchBrowser.checked) localStorage.setItem('flashWatchInBrowser', '1');
@@ -269,13 +302,43 @@ function notFound(method) {
 }
 
 export default {
-  async fetch(request) {
+  async fetch(request, env = {}) {
     const url = new URL(request.url)
     const method = request.method.toUpperCase()
-    if (method !== 'GET' && method !== 'HEAD') return notFound(method)
-
+    if (url.pathname === '/api/feedback') {
+      const reply = (status, headers = {}) => new Response(null, {
+        status, headers: { 'Cache-Control': 'no-store', ...headers },
+      })
+      if (method !== 'POST') return reply(405, { Allow: 'POST' })
+      if (!env.FEEDBACK_UPSTREAM) return reply(503)
+      try {
+        const clientIp = request.headers.get('CF-Connecting-IP') || 'unknown'
+        if (env.FEEDBACK_LIMITER) {
+          const result = await env.FEEDBACK_LIMITER.limit({ key: clientIp })
+          if (result.success === false) return reply(429)
+        }
+        const length = request.headers.get('Content-Length')
+        if (length !== null && (Number(length) <= 0 || Number(length) > 4096)) return reply(413)
+        const body = await request.arrayBuffer()
+        if (body.byteLength === 0 || body.byteLength > 4096) return reply(413)
+        const headers = { 'Content-Type': 'application/json' }
+        if (env.FEEDBACK_KEY) {
+          headers['X-Flash-Proxy-Key'] = env.FEEDBACK_KEY
+          headers['X-Flash-Client-IP'] = request.headers.get('CF-Connecting-IP') || ''
+        }
+        const upstream = await fetch(env.FEEDBACK_UPSTREAM, {
+          method: 'POST', headers, body, redirect: 'manual', signal: AbortSignal.timeout(8000),
+        })
+        return reply([204, 400, 413, 429].includes(upstream.status) ? upstream.status : 502)
+      } catch {
+        return reply(502)
+      }
+    }
     const match = /^\/c\/([^/]+?)(\.mp4)?$/.exec(url.pathname)
     if (!match || !CLIP_ID.test(match[1])) return notFound(method)
+    if (method !== 'GET' && method !== 'HEAD') {
+      return new Response(null, { status: 405, headers: { Allow: 'GET, HEAD', 'Cache-Control': 'no-store' } })
+    }
 
     const id = match[1]
     const videoUrl = `${SHARE_ORIGIN}/c/${id}.mp4`
@@ -299,7 +362,7 @@ export default {
 
     if (clipResponse.status === 404) {
       const html = pageTemplate({ title: 'Clip gone', meta: 'This clip has expired.', canonicalUrl })
-      return htmlResponse(html, 410, method)
+      return htmlResponse(html, 410, method, { 'Cache-Control': 'no-store' })
     }
 
     const html = pageTemplate({ title: 'Clip unavailable', meta: 'Can’t load this clip right now.', canonicalUrl })

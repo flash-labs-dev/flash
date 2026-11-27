@@ -5,3 +5,5 @@ DESIGN.md
 node_modules
 .wrangler
 worker.test.mjs
+.env*
+.dev.vars*
