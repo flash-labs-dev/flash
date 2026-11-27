@@ -238,7 +238,7 @@ function Range({ value, min, max, step, onChange, label, suffix }: {
   const filled = max > min ? ((value - min) / (max - min)) * 100 : 0
   return (
     <>
-      <span className="display" style={{ fontSize: 22, color: 'var(--fg)', minWidth: 48, textAlign: 'right' }}>{value}{suffix}</span>
+      <span className="tabular" style={{ fontSize: 14, fontWeight: 500, color: 'var(--fg)', minWidth: 40, textAlign: 'right' }}>{value}{suffix}</span>
       <input type="range" className="audio-gain-range" aria-label={label}
         min={min} max={max} step={step} value={value}
         onChange={event => onChange(+event.target.value)}
