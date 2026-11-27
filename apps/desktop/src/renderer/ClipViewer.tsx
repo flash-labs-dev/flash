@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { clipUrl } from '../shared/editor'
+import { clipDisplayTitle } from '../shared/clipTitle'
 import { type Clip, GameMark, Icon, RenameTitle, formatBytes } from './ui'
 
 // The clip viewer from docs/flash-ui-handoff (Viewer): back to the library,
@@ -173,7 +174,7 @@ export function FeedView({ clips, currentPath, onPathChange, onOpenLibrary, onDe
       <aside className="flex flex-col shrink-0 overflow-y-auto" style={{ width: 340, gap: 18, padding: 20, borderRadius: 8, background: 'var(--panel)', border: '1px solid var(--border-subtle, var(--edge))' }}>
         <div className="flex flex-col" style={{ gap: 6 }}>
           <span style={{ fontSize: 12, color: 'var(--muted)' }}>Title</span>
-          <RenameTitle title={clip.title} onCommit={name => onRename(clip, name)} style={{ fontSize: 18, fontWeight: 600, color: 'var(--fg)', lineHeight: 1.3 }} />
+          <RenameTitle title={clip.title} display={clipDisplayTitle(clip.title)} onCommit={name => onRename(clip, name)} style={{ fontSize: 18, fontWeight: 600, color: 'var(--fg)', lineHeight: 1.3 }} />
         </div>
 
         <div className="grid" style={{ gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 8 }}>
