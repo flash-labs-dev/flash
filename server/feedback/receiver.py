@@ -15,6 +15,7 @@ GET|HEAD /c/<id>.mp4  serves the clip, with Range support so players can seek.
 Nothing from the client is trusted: fields are length-capped and stripped of
 control characters, and file names are generated server-side.
 """
+import hmac
 import json
 import os
 import re
@@ -33,6 +34,7 @@ MAX_MESSAGE = 2000
 PER_IP_PER_HOUR = 5
 GLOBAL_PER_HOUR = 100
 PATH = "/flash-feedback"
+PROXY_KEY = os.environ.get("PROXY_KEY", "")
 
 CLIP_PATH = "/flash-clips"
 MAX_CLIP_BYTES = int(os.environ.get("MAX_CLIP_BYTES", str(100 * 1024 * 1024)))
@@ -104,10 +106,13 @@ feedback_limit = RateLimiter(PER_IP_PER_HOUR, GLOBAL_PER_HOUR)
 clip_limit = RateLimiter(CLIP_PER_IP_PER_HOUR, CLIP_GLOBAL_PER_HOUR)
 
 
-def clean(value, limit):
+def clean(value, limit, multiline=False):
     if not isinstance(value, str):
         return ""
-    return CTRL.sub("", value).strip()[:limit]
+    value = CTRL.sub("", value)
+    if not multiline:
+        value = value.replace("\r", "").replace("\n", "")
+    return value.strip()[:limit]
 
 
 def allowed(ip):
@@ -223,6 +228,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path != PATH:
             return self.reply(404)
         ip = self.client_ip()
+        forwarded_ip = self.headers.get("X-Flash-Client-IP", "")
+        if (PROXY_KEY and forwarded_ip and hmac.compare_digest(
+                self.headers.get("X-Flash-Proxy-Key", "").encode(), PROXY_KEY.encode())):
+            ip = forwarded_ip[:64]
         try:
             length = int(self.headers.get("Content-Length", "0"))
         except ValueError:
@@ -236,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.reply(400)
         if not isinstance(data, dict):
             return self.reply(400)
-        message = clean(data.get("message"), MAX_MESSAGE)
+        message = clean(data.get("message"), MAX_MESSAGE, multiline=True)
         if len(message) < 3:
             return self.reply(400)
         if not allowed(ip):

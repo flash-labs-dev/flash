@@ -158,6 +158,29 @@ class ClipTests(unittest.TestCase):
         body = json.dumps({"message": "hello there", "version": "1", "os": "win32"}).encode()
         self.assertEqual(call(self.port, "POST", "/flash-feedback", body)[0], 204)
 
+    def test_feedback_metadata_cannot_add_front_matter_fields(self):
+        self.assertNotIn("\n", receiver.clean("1\nadmin: true", 32))
+
+    def test_feedback_proxy_key_uses_forwarded_client_ip(self):
+        body = json.dumps({"message": "hello there"}).encode()
+        original = receiver.PROXY_KEY
+        receiver.PROXY_KEY = "secret"
+        receiver.feedback_limit.by_ip.clear()
+        receiver.feedback_limit.all.clear()
+        try:
+            headers = {"X-Flash-Proxy-Key": "secret", "X-Flash-Client-IP": "192.0.2.1"}
+            self.assertEqual([call(self.port, "POST", "/flash-feedback", body, headers)[0]
+                              for _ in range(6)], [204] * 5 + [429])
+            headers["X-Flash-Client-IP"] = "192.0.2.2"
+            self.assertEqual(call(self.port, "POST", "/flash-feedback", body, headers)[0], 204)
+            headers["X-Flash-Proxy-Key"] = "wrong"
+            self.assertEqual([call(self.port, "POST", "/flash-feedback", body, headers)[0]
+                              for _ in range(6)], [204] * 5 + [429])
+        finally:
+            receiver.PROXY_KEY = original
+            receiver.feedback_limit.by_ip.clear()
+            receiver.feedback_limit.all.clear()
+
 
 if __name__ == "__main__":
     unittest.main()

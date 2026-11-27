@@ -7,6 +7,8 @@ services:
       INBOX_DIR: /data/inbox
       CLIPS_DIR: /data/clips
       PORT: "8796"
+      # Shared secret for trusted feedback proxy requests.
+      PROXY_KEY: "${PROXY_KEY:-}"
       # Share links: 100 MB per clip, 20 GB in total, gone after 7 days.
       MAX_CLIP_BYTES: "104857600"
       MAX_STORE_BYTES: "21474836480"
