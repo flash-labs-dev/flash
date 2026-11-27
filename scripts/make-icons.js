@@ -10,11 +10,6 @@ const { join } = require('path')
 
 const THEMES = {
   blood:       { bg: '#0C0607', glow: '#2A1017', accent: '#C1121F' },
-  ultraviolet: { bg: '#09060F', glow: '#241539', accent: '#B45CFF' },
-  cobalt:      { bg: '#070910', glow: '#101F3D', accent: '#4D7CFE' },
-  fuchsia:     { bg: '#0D0710', glow: '#330F26', accent: '#FF4FA3' },
-  indigo:      { bg: '#080814', glow: '#191740', accent: '#7C74FF' },
-  bone:        { bg: '#0A0A0C', glow: '#232327', accent: '#EDE9F5' },
 }
 
 const SIZE = 512

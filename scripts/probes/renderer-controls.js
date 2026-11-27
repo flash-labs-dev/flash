@@ -42,9 +42,9 @@ app.whenReady().then(async () => {
   for (const theme of Object.keys(THEMES)) {
     await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(toastHtml(theme, font, 125))}`)
     const result = await window.webContents.executeJavaScript(`(async () => {
-      await document.fonts.load('600 26px Geist')
+      await document.fonts.load('500 14px Geist')
       const title = document.querySelector('h3'), surface = document.querySelector('.surface')
-      return {font: document.fonts.check('600 26px Geist'), animation: getComputedStyle(surface).animationName, fits: title.scrollWidth <= title.clientWidth}
+      return {font: document.fonts.check('500 14px Geist'), animation: getComputedStyle(surface).animationName, fits: title.scrollWidth <= title.clientWidth}
     })()`)
     assert.deepEqual(result, { font: true, animation: 'none', fits: true })
     await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(overlayHtml(theme, font))}`)
@@ -56,7 +56,7 @@ app.whenReady().then(async () => {
     const bounds = cornerBounds({ x: -1920, y: 0, width: 1920, height: 1080 }, corner, 280, 72)
     assert(bounds.x >= -1920 && bounds.x + bounds.width <= 0 && bounds.y >= 0 && bounds.y + bounds.height <= 1080)
   }
-  console.log('PASS: six toast/overlay themes load bundled Geist, reduced motion disables animations, all corners stay on target')
+  console.log('PASS: toast/overlay theme load bundled Geist, reduced motion disables animations, all corners stay on target')
   window.destroy()
   app.quit()
 }).catch(error => { console.error(error); app.exit(1) })

@@ -1,13 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { clipUrl } from '../shared/editor'
-import { THEMES } from '../shared/themes'
 import { toAccelerator } from '../shared/accelerator'
 import { resolveGameSettings } from '../shared/perGame'
 import { countSyllables } from '../shared/syllables'
 import type { AutostartState } from '../preload/preload'
 import { assignApp, laneLabel, LANE_DISPLAY_ORDER, type AudioTracksSetting } from '../shared/audioLanes'
 import { Dropdown } from './Dropdown'
-import { ConfirmDialog, Toggle, formatBytes } from './ui'
+import { ConfirmDialog, Icon, Toggle, formatBytes } from './ui'
 import { FeedbackDialog } from './FeedbackDialog'
 
 export interface Settings {
@@ -33,6 +32,7 @@ export interface Settings {
   micDeviceId: string
   autoSave: boolean
   notifications: boolean
+  discordPresence: boolean
   autoDeleteDays: number
   maxStorageGB?: number
   perGame: Record<string, { quality?: string; bufferLength?: number }>
@@ -77,36 +77,7 @@ function qualityFps(quality: string): number {
   return match ? Number(match[1]) : 0
 }
 
-// One still from a real clip, so each theme is previewed over actual footage
-// rather than an empty box. Decoded once into a small JPEG and the decoder is
-// released straight away.
-function useClipStill(filePath: string | undefined): string | null {
-  const [still, setStill] = useState<string | null>(null)
-  useEffect(() => {
-    if (!filePath) return
-    let cancelled = false
-    const video = document.createElement('video')
-    video.muted = true
-    video.preload = 'auto'
-    video.crossOrigin = 'anonymous'
-    const release = () => { video.removeAttribute('src'); video.load() }
-    video.addEventListener('seeked', () => {
-      if (cancelled) return
-      const canvas = document.createElement('canvas')
-      canvas.width = 384
-      canvas.height = 216
-      canvas.getContext('2d')?.drawImage(video, 0, 0, canvas.width, canvas.height)
-      try { setStill(canvas.toDataURL('image/jpeg', 0.8)) } catch { /* tainted or empty: keep the plain swatch */ }
-      release()
-    }, { once: true })
-    video.addEventListener('loadedmetadata', () => { video.currentTime = Math.min(1, video.duration / 2 || 0) }, { once: true })
-    video.src = clipUrl(filePath)
-    return () => { cancelled = true; release() }
-  }, [filePath])
-  return still
-}
-
-const SECTIONS = ['Appearance', 'Capture', 'Voice', 'Games', 'Overlay', 'Storage'] as const
+const SECTIONS = ['Capture', 'Voice', 'Games', 'Notifications', 'Storage'] as const
 
 // ── Pieces ────────────────────────────────────────────────────────────────────
 
@@ -116,10 +87,10 @@ const SECTIONS = ['Appearance', 'Capture', 'Voice', 'Games', 'Overlay', 'Storage
 // Anything holding its own state below a Row lost it on that tick.
 function Row({ label, hint, children }: { label: string; hint?: React.ReactNode; children: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-6" style={{ padding: '16px 0', borderBottom: '1px solid var(--edge-soft)' }}>
+    <div className="settings-row flex items-center justify-between gap-6">
       <div className="min-w-0">
-        <div style={{ fontSize: 14, color: 'var(--fg)' }}>{label}</div>
-        {hint && <div style={{ fontSize: 12, color: 'var(--muted)', marginTop: 4, lineHeight: 1.5 }}>{hint}</div>}
+        <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--fg)' }}>{label}</div>
+        {hint && <div style={{ fontSize: 13, color: 'var(--muted)', marginTop: 3, lineHeight: 1.45 }}>{hint}</div>}
       </div>
       <div className="shrink-0 flex items-center gap-3">{children}</div>
     </div>
@@ -244,18 +215,18 @@ function AppAudio({ lanes, onChange, onSupported }: {
   )
 }
 
-function Section({ id, title, children, sectionRef }: {
+function Section({ id, title, description, children, sectionRef }: {
   id: string
   title: string
+  description?: string
   children: React.ReactNode
   sectionRef: (node: HTMLElement | null) => void
 }) {
   return (
-    <section id={`settings-${id}`} ref={sectionRef} aria-labelledby={`settings-${id}-title`} style={{ paddingTop: 48 }}>
-      <h2 id={`settings-${id}-title`} className="display" style={{ fontSize: 40, color: 'var(--fg)', paddingBottom: 14, borderBottom: '1px solid var(--line)' }}>
-        {title}
-      </h2>
-      {children}
+    <section id={`settings-${id}`} ref={sectionRef} aria-labelledby={`settings-${id}-title`} style={{ paddingTop: 32, scrollMarginTop: 8 }}>
+      <h2 id={`settings-${id}-title`} style={{ fontSize: 16, fontWeight: 600, color: 'var(--fg)' }}>{title}</h2>
+      {description && <p style={{ fontSize: 13, color: 'var(--muted)', marginTop: 4 }}>{description}</p>}
+      <div className="settings-panel" style={{ marginTop: 12 }}>{children}</div>
     </section>
   )
 }
@@ -276,7 +247,7 @@ function Range({ value, min, max, step, onChange, label, suffix }: {
   const filled = max > min ? ((value - min) / (max - min)) * 100 : 0
   return (
     <>
-      <span className="display" style={{ fontSize: 22, color: 'var(--fg)', minWidth: 48, textAlign: 'right' }}>{value}{suffix}</span>
+      <span className="tabular" style={{ fontSize: 14, fontWeight: 500, color: 'var(--fg)', minWidth: 40, textAlign: 'right' }}>{value}{suffix}</span>
       <input type="range" className="audio-gain-range" aria-label={label}
         min={min} max={max} step={step} value={value}
         onChange={event => onChange(+event.target.value)}
@@ -313,27 +284,34 @@ function HotkeyInput({ value, registered, onChange, label }: {
     return () => window.removeEventListener('keydown', onKey, true)
   }, [listening, onChange])
 
-  const failed = !registered && !listening && Boolean(value)
+  const unset = !value
+  const failed = !registered && !listening && !unset
   return (
-    <button type="button" onClick={() => setListening(l => !l)} aria-label={`${label}: ${value || 'Unset'}. Click to change`}
-      data-hotkey-listening={listening || undefined}
-      title={failed ? 'Another program already owns this key. Pick a different one.' : 'Click, then press a key'}
-      className="tabular transition-colors"
-      style={{
-        height: 32, minWidth: 112, padding: '0 14px', borderRadius: 6, fontSize: 12, fontWeight: 600, letterSpacing: '0.04em',
-        color: listening ? 'var(--fg)' : failed ? 'var(--alert)' : 'var(--fg)',
-        background: listening ? 'var(--glass)' : 'transparent',
-        border: `1px solid ${listening ? 'var(--fg)' : failed ? 'var(--alert)' : 'var(--line)'}`,
-      }}>
-      {listening ? 'Key or Delete…' : failed ? `${value} is taken` : value || 'Unset'}
-    </button>
+    <span className="flex items-center gap-2">
+      <button type="button" onClick={() => setListening(l => !l)} aria-label={`${label}: ${value || 'not set'}. Click to change`}
+        data-hotkey-listening={listening || undefined}
+        title={failed ? 'Another program already owns this key. Pick a different one.' : 'Click, then press a key'}
+        className="tabular transition-colors"
+        style={{
+          height: 32, minWidth: 112, padding: '0 14px', borderRadius: 6, fontSize: 13, fontWeight: 500,
+          color: listening ? 'var(--fg)' : failed ? 'var(--alert)' : unset ? 'var(--muted)' : 'var(--fg)',
+          background: listening ? 'var(--glass)' : 'transparent',
+          border: `1px solid ${listening ? 'var(--fg)' : failed ? 'var(--alert)' : 'var(--line)'}`,
+        }}>
+        {listening ? 'Key or Delete…' : unset ? 'Not set' : failed ? `${value} is taken` : value}
+      </button>
+      {/* Unbind: the key does nothing in Flash until a new one is set. */}
+      <button type="button" className="win-btn" aria-label={`Unbind ${label.toLowerCase()}`} title="Unbind"
+        disabled={unset} onClick={() => onChange('')} style={{ visibility: unset ? 'hidden' : 'visible' }}>
+        <Icon name="close" size={14} />
+      </button>
+    </span>
   )
 }
 
 // ── View ──────────────────────────────────────────────────────────────────────
 
-export function SettingsView({ previewClip, settings, onChange, storage, encoder, captureBackend, voiceStatus, hotkeysRegistered, autostart, onToggleAutostart, displays, health, learnedGames, onForgetGame, onOpenFolder, onPickFolder }: {
-  previewClip?: string
+export function SettingsView({ settings, onChange, storage, encoder, captureBackend, voiceStatus, hotkeysRegistered, autostart, onToggleAutostart, displays, health, learnedGames, onForgetGame, onOpenFolder, onPickFolder }: {
   settings: Settings
   onChange: (partial: Partial<Settings> | ((current: Settings) => Partial<Settings>)) => void
   storage: { used: number; clips: number }
@@ -356,7 +334,6 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
   const customPhraseSyllables = countSyllables(settings.voicePhrase)
   const customPhraseTooShort = settings.voicePhrase.trim().length > 0 && customPhraseSyllables < 3
 
-  const still = useClipStill(previewClip)
   const scroller = useRef<HTMLDivElement>(null)
   const sectionNodes = useRef<Record<string, HTMLElement | null>>({})
   const [current, setCurrent] = useState<string>(SECTIONS[0])
@@ -414,14 +391,14 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
   const register = (id: string) => (node: HTMLElement | null) => { sectionNodes.current[id] = node }
 
   return (
-    <div ref={scroller} className="flex-1 overflow-y-auto grain">
-      <div className="flex mx-auto" style={{ maxWidth: 1080, padding: '0 40px 96px', gap: 64 }}>
-        <nav aria-label="Settings sections" className="shrink-0" style={{ width: 192, position: 'sticky', top: 0, alignSelf: 'flex-start', paddingTop: 56 }}>
-          <h1 className="display" style={{ fontSize: 32, color: 'var(--fg)', marginBottom: 28 }}>Settings</h1>
-          <ul className="flex flex-col" style={{ gap: 4 }}>
+    <div ref={scroller} className="flex-1 overflow-y-auto">
+      <div className="flex" style={{ maxWidth: 1100, padding: '0 32px 96px', gap: 40 }}>
+        <nav aria-label="Settings sections" className="shrink-0" style={{ width: 200, position: 'sticky', top: 0, alignSelf: 'flex-start', paddingTop: 28 }}>
+          <h1 style={{ fontSize: 24, fontWeight: 600, letterSpacing: '-0.01em', color: 'var(--fg)', marginBottom: 16 }}>Settings</h1>
+          <ul className="flex flex-col" style={{ gap: 2 }}>
             {SECTIONS.map(section => (
               <li key={section}>
-                <button className="tab" aria-current={current === section ? 'page' : undefined}
+                <button className="settings-nav" aria-current={current === section ? 'page' : undefined}
                   onClick={() => sectionNodes.current[section]?.scrollIntoView({ behavior: 'smooth', block: 'start' })}>
                   {section}
                 </button>
@@ -430,40 +407,7 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
           </ul>
         </nav>
 
-        <div className="flex-1 min-w-0" style={{ paddingTop: 8 }}>
-          <Section id="Appearance" title="Appearance" sectionRef={register('Appearance')}>
-            <div className="grid" style={{ gap: 12, paddingTop: 20, gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))' }}>
-              {Object.entries(THEMES).map(([key, theme]) => {
-                const selected = settings.theme === key
-                return (
-                  <button key={key} onClick={() => onChange({ theme: key })} aria-pressed={selected}
-                    className="flex flex-col text-left" style={{ gap: 10 }}>
-                    {/* The Watch screen in that palette: your latest clip under
-                        the theme's scrim, its title, and the accent where it
-                        actually appears - the REC light and the progress bar. */}
-                    <span className="relative block w-full overflow-hidden"
-                      style={{
-                        aspectRatio: '16 / 10', borderRadius: 8, background: theme.bg,
-                        outline: selected ? '2px solid var(--fg)' : `1px solid ${theme.edge}`, outlineOffset: selected ? 2 : 0,
-                      }}>
-                      {still && <img src={still} alt="" className="absolute inset-0 w-full h-full object-cover" />}
-                      <span className="absolute inset-0" style={{ background: `linear-gradient(to top, ${theme.bg} 8%, ${theme.bg}99 45%, transparent 80%)` }} />
-                      <span className="absolute flex items-center" style={{ left: 8, top: 8, gap: 4, padding: '2px 6px', borderRadius: 99, background: `${theme.bg}b3` }}>
-                        <span style={{ width: 6, height: 6, borderRadius: 99, background: theme.accent }} />
-                        <span style={{ fontSize: 8, fontWeight: 700, letterSpacing: '0.12em', color: theme.fg }}>REC</span>
-                      </span>
-                      <span className="absolute display" style={{ left: 10, bottom: 16, fontSize: 22, color: theme.fg }}>9 Oct</span>
-                      <span className="absolute" style={{ left: 0, right: 0, bottom: 0, height: 4, background: `${theme.fg}33` }}>
-                        <span className="absolute" style={{ left: 0, top: 0, bottom: 0, width: '45%', background: theme.accent }} />
-                      </span>
-                    </span>
-                    <span className="caps" style={{ color: selected ? 'var(--fg)' : 'var(--muted)' }}>{theme.label}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </Section>
-
+        <div className="flex-1 min-w-0" style={{ maxWidth: 820 }}>
           <Section id="Capture" title="Capture" sectionRef={register('Capture')}>
             <Row label="Clip hotkey" hint={`Saves the full ${settings.bufferLength} seconds.`}>
               <HotkeyInput label="Clip hotkey" value={settings.hotkey} registered={hotkeysRegistered.clip}
@@ -651,35 +595,31 @@ export function SettingsView({ previewClip, settings, onChange, storage, encoder
             )}
           </Section>
 
-          <Section id="Overlay" title="Overlay" sectionRef={register('Overlay')}>
-            <Row label="Clip saved notification">
+          <Section id="Notifications" title="Notifications" description="What Flash shows when a clip is saved." sectionRef={register('Notifications')}>
+            <Row label="Clip saved notification" hint="A small card with a sound when a clip is saved.">
               <Toggle label="Clip saved notification" on={settings.notifications} onChange={() => onChange({ notifications: !settings.notifications })} />
+            </Row>
+            <Row label="Notification corner" hint="Where the clip saved card appears. The in-game overlay uses the same corner.">
+              <div className="corner-picker" role="radiogroup" aria-label="Notification corner">
+                {([['top-left', 'Top left'], ['top-right', 'Top right'], ['bottom-left', 'Bottom left'], ['bottom-right', 'Bottom right']] as const).map(([value, label]) => (
+                  <button key={value} role="radio" aria-checked={settings.overlayPosition === value} aria-label={label} title={label}
+                    onClick={() => onChange({ overlayPosition: value })} data-corner={value} />
+                ))}
+              </div>
+            </Row>
+            <Row label="Discord presence" hint="Shows “Clipping <game> with Flash” on your Discord profile while you play.">
+              <Toggle label="Discord presence" on={settings.discordPresence} onChange={() => onChange({ discordPresence: !settings.discordPresence })} />
             </Row>
             <Row label="In-game overlay"
               hint="Shows recording status over borderless and windowed games. It never hooks the game, so it is safe with anti-cheat, but it cannot draw over exclusive fullscreen.">
               <Toggle label="In-game overlay" on={settings.overlay} onChange={() => onChange({ overlay: !settings.overlay })} />
             </Row>
-            {settings.overlay && (
-              <Row label="Overlay corner">
-                <Dropdown label="Overlay corner"
-                  value={settings.overlayPosition}
-                  onChange={overlayPosition => onChange({ overlayPosition: overlayPosition as Settings['overlayPosition'] })}
-                  width={150}
-                  options={[
-                    { value: 'top-left', label: 'Top left' },
-                    { value: 'top-right', label: 'Top right' },
-                    { value: 'bottom-left', label: 'Bottom left' },
-                    { value: 'bottom-right', label: 'Bottom right' },
-                  ]}
-                />
-              </Row>
-            )}
           </Section>
 
           <Section id="Storage" title="Storage" sectionRef={register('Storage')}>
-            <div className="flex items-end gap-4" style={{ padding: '20px 0 8px' }}>
-              <span className="display" style={{ fontSize: 48, color: 'var(--fg)' }}>{formatBytes(storage.used)}</span>
-              <span style={{ fontSize: 13, color: 'var(--muted)', paddingBottom: 6 }}>
+            <div className="settings-row flex items-end gap-3">
+              <span style={{ fontSize: 24, fontWeight: 600, color: 'var(--fg)' }}>{formatBytes(storage.used)}</span>
+              <span style={{ fontSize: 13, color: 'var(--muted)', paddingBottom: 3 }}>
                 across {storage.clips} clips and screenshots · MP4 / PNG
               </span>
             </div>

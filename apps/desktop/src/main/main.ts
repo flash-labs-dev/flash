@@ -97,6 +97,8 @@ const DEFAULTS = {
   micDeviceId: '',   // empty = the Windows default communications mic
   autoSave: true,
   notifications: true,
+  // Shown by the Linux build only for now.
+  discordPresence: true,
   autoDeleteDays: 0,  // 0 = never
   maxStorageGB: 0, // 0 = no size limit
   // WHICH installer request has already been acted on for this Windows
@@ -1059,7 +1061,7 @@ function onClipSaved(clip: { path: string; duration: number }, game: string, sav
   } catch (error) { metadataError = `Clip saved, but its metadata could not be saved: ${saveError(error)}` }
   // The clip is already on disk; a toast that fails to draw must not turn a
   // successful save into a reported error.
-  try { showClipNotification(clip.duration) } catch (error) { console.warn('Could not show the clip toast', error) }
+  try { showClipNotification(clip.duration, game) } catch (error) { console.warn('Could not show the clip toast', error) }
   playClipSound()
   mainWindow?.webContents.send('clip-saved-refresh')
   // The boundary probe evaluates this save handler by itself.
@@ -1438,7 +1440,7 @@ function captureDisplay() {
   return screen.getPrimaryDisplay()
 }
 
-function showClipNotification(durationSeconds: number) {
+function showClipNotification(durationSeconds: number, game: string) {
   if (!settings.notifications) return
 
   if (notificationWindow && !notificationWindow.isDestroyed()) {
@@ -1446,7 +1448,7 @@ function showClipNotification(durationSeconds: number) {
   }
 
   const notification = new BrowserWindow({
-    ...cornerBounds(captureDisplay().workArea, settings.overlayPosition, 280, 72),
+    ...cornerBounds(captureDisplay().workArea, settings.overlayPosition, 280, 64),
     frame: false, transparent: true, alwaysOnTop: true,
     skipTaskbar: true, resizable: false, focusable: false, show: false,
     type: 'toolbar', hasShadow: false,
@@ -1456,7 +1458,7 @@ function showClipNotification(durationSeconds: number) {
   notification.setAlwaysOnTop(true, 'screen-saver')
   notification.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   notification.setIgnoreMouseEvents(true, { forward: true })
-  const html = toastHtml(settings.theme, uiFont(), durationSeconds)
+  const html = toastHtml(settings.theme, uiFont(), durationSeconds, game, settings.overlayPosition)
   notification.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`)
   let timer: ReturnType<typeof setTimeout> | undefined
   notification.once('closed', () => {
@@ -1467,7 +1469,12 @@ function showClipNotification(durationSeconds: number) {
   notification.once('ready-to-show', () => {
     if (notification.isDestroyed()) return
     notification.showInactive()
-    timer = setTimeout(() => { if (!notification.isDestroyed()) notification.close() }, 3200)
+    // Play the exit animation, then close; 300 ms covers .toast.out (280 ms) in windowTemplates.
+    timer = setTimeout(() => {
+      if (notification.isDestroyed()) return
+      notification.webContents.executeJavaScript('window.leave()').catch(() => {})
+      timer = setTimeout(() => { if (!notification.isDestroyed()) notification.close() }, 300)
+    }, 3000)
   })
 }
 

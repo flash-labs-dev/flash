@@ -169,7 +169,7 @@ export function AudioLanes({ tracks, gains, onGainChange, onGainDragStart, onGai
               style={{ color: 'var(--muted-3)', border: '1px solid var(--edge)' }}>
               <TrackIcon id={id} />
             </span>
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--muted-3)', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
+            <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--muted-3)' }}>
               {laneLabel(id)}
             </span>
             <span className="lane-skeleton" style={{ height: 6 }} aria-hidden="true" />

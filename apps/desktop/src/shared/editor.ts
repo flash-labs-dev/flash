@@ -139,5 +139,7 @@ export function clampRange(inSec: number, outSec: number, durationSec: number, m
 export function clipUrl(filePath: string): string {
   const windows = /^[a-z]:[\\/]/i.test(filePath) || filePath.startsWith('\\\\')
   const path = (windows ? filePath.replace(/\\/g, '/') : filePath).split('/').map(encodeURIComponent).join('/')
-  return 'flash-clip://local' + (windows ? '/' : '') + path
+  // The Tauri build serves clips over loopback HTTP (WebKitGTK cannot stream video from a custom scheme).
+  const base = (globalThis as { __FLASH_CLIP_BASE?: string }).__FLASH_CLIP_BASE
+  return (base || 'flash-clip://local') + (windows ? '/' : '') + path
 }

@@ -100,10 +100,11 @@ assert.deepEqual(sanitise(settings, { bufferLength: 60, shortClipSeconds: 60 }),
 assert.deepEqual(sanitise({ ...settings, bufferLength: 60 }, { shortClipSeconds: 45 }), { shortClipSeconds: 45 })
 for (const autoDeleteDays of [0, 1, 7, 14, 30, 90, 365, 3650]) assert.equal(sanitise(settings, { autoDeleteDays }).autoDeleteDays, autoDeleteDays)
 for (const autoDeleteDays of [-1, 0.5, 3651, NaN, Infinity, '7']) assert.deepEqual(sanitise(settings, { autoDeleteDays }), {})
-for (const theme of ['blood', 'ultraviolet', 'cobalt', 'fuchsia', 'indigo', 'bone']) {
+for (const theme of ['blood']) {
   assert.equal(sanitise(settings, { theme }).theme, theme)
 }
-for (const theme of ['unknown', 'toString', '__proto__']) assert.deepEqual(sanitise(settings, { theme }), {})
+// Themes were removed; old saved picks fall back to blood.
+for (const theme of ['ultraviolet', 'bone', 'unknown', 'toString', '__proto__']) assert.deepEqual(sanitise(settings, { theme }), {})
 for (const overlayPosition of ['top-left', 'top-right', 'bottom-left', 'bottom-right']) {
   assert.equal(sanitise(settings, { overlayPosition }).overlayPosition, overlayPosition)
 }

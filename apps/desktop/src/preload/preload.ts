@@ -60,6 +60,7 @@ export interface Settings {
   micDeviceId: string
   autoSave: boolean
   notifications: boolean
+  discordPresence: boolean
   autoDeleteDays: number
   perGame: Record<string, { quality?: string; bufferLength?: number }>
 }
@@ -106,6 +107,8 @@ contextBridge.exposeInMainWorld('flash', {
     'start-clip-drag', Array.isArray(filePaths) ? filePaths : [filePaths]),
   moveClips: (filePaths: string[], game: string) => ipcRenderer.invoke('move-clips', filePaths, game),
   copyClipFile: (filePath: string) => ipcRenderer.invoke('copy-clip-file', filePath),
+  // A data URL of the game's real icon, or null. Only the Linux (Tauri) build answers yet.
+  getGameIcon: (game: string) => ipcRenderer.invoke('get-game-icon', game),
   shareClipLink: (filePath: string) => ipcRenderer.invoke('share-clip-link', filePath),
   setBatchShareClips: (filePaths: string[] | null, token?: string) => ipcRenderer.invoke('set-batch-share-clips', filePaths, token),
   saveSharedClip: (mp4Url: string) => ipcRenderer.invoke('save-shared-clip', mp4Url),
@@ -216,6 +219,7 @@ export type FlashAPI = {
   startClipDrag: (filePaths: string | string[]) => void
   moveClips: (filePaths: string[], game: string) => Promise<{ moved: number; error?: string }>
   copyClipFile: (filePath: string) => Promise<boolean>
+  getGameIcon?: (game: string) => Promise<string | null>
   shareClipLink: (filePath: string) => Promise<{ ok: true; url: string; days: number } | { ok: false; error: string }>
   setBatchShareClips: (filePaths: string[] | null, token?: string) => Promise<string | null>
   saveSharedClip: (mp4Url: string) => Promise<{ path?: string; error?: string }>
