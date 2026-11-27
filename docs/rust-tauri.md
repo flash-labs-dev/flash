@@ -39,7 +39,10 @@ Next:
    through a small C API and call it from Rust. Engine logic moves out of the
    N-API `binding.cpp` into a shared `Engine` class used by both builds.
 2. Library (clip listing, thumbnails, rename/delete/move), hotkeys, tray,
-   game detection, notifications.
+   game detection, notifications. **Done** (Linux): `library.rs`, `detect.rs`,
+   `hotkeys.rs` (xdg GlobalShortcuts portal), tray, toast window and clip
+   sound in `main.rs`. Not ported yet: the editor (trim/export/audio lanes),
+   screenshots, voice clipping, share links, feedback, updates.
 3. Split the engine into its own background process so the UI process can
    exit while clipping continues.
 4. Port capture pieces to Rust where it pays off.
@@ -56,3 +59,12 @@ Next:
 Most of the remaining memory is WebKitGTK's web process on the NVIDIA GL
 driver. Closing the window while the engine keeps recording (step 3) is where
 the background footprint drops to the engine alone.
+
+## Linux runtime requirements
+
+- `gst-plugins-good`: WebKitGTK needs it to demux MP4 and output audio. Without
+  it the web process hangs as soon as a clip thumbnail or the player loads.
+- A desktop entry named `com.flash.clipper.desktop` (template in `src-tauri/`):
+  KDE only shows the global-shortcut dialog for an app id it can resolve.
+- On Wayland the toast cannot place itself in a corner (KWin centres it);
+  anchoring it needs gtk-layer-shell.

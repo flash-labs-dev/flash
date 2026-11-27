@@ -9,7 +9,8 @@ pub const QUALITY_OPTIONS: &[&str] = &[
     "720p 30fps", "720p 60fps", "1080p 30fps", "1080p 60fps", "1080p 120fps", "1080p 144fps",
     "1440p 60fps", "1440p 120fps", "4K 30fps", "4K 60fps",
 ];
-const THEMES: &[&str] = &["blood", "ultraviolet", "cobalt", "fuchsia", "indigo", "bone"];
+// Themes were removed; old saved picks fall back to blood.
+const THEMES: &[&str] = &["blood"];
 const OVERLAY_POSITIONS: &[&str] = &["top-left", "top-right", "bottom-left", "bottom-right"];
 
 pub fn defaults(videos_dir: &Path) -> Map<String, Value> {
@@ -26,6 +27,7 @@ pub fn defaults(videos_dir: &Path) -> Map<String, Value> {
         "voiceRawFloor": 0.30,
         "voiceCooldownMs": 3000,
         "displayId": 0,
+        "captureMode": "game",
         "overlay": !wayland,
         "portalRestoreToken": "",
         "overlayPosition": "top-left",
@@ -135,6 +137,7 @@ pub fn sanitise(defaults: &Map<String, Value>, parsed: &Value) -> Map<String, Va
             "autoDeleteDays" => [0.0, 7.0, 30.0, 90.0].contains(&number),
             "theme" => THEMES.contains(&text),
             "overlayPosition" => OVERLAY_POSITIONS.contains(&text),
+            "captureMode" => ["game", "screen"].contains(&text),
             "hotkey" | "hotkeyShort" | "screenshotHotkey" => !text.trim().is_empty(),
             _ => true,
         };
@@ -207,8 +210,8 @@ mod tests {
     #[test]
     fn drops_wrong_types() {
         let clean = sanitise(&d(), &json!({ "overlayPosition": null, "hotkey": 5, "overlay": "yes", "theme": "cobalt" }));
-        assert_eq!(clean.len(), 1);
-        assert_eq!(clean["theme"], "cobalt");
+        assert!(clean.get("theme").is_none());
+        assert!(clean.is_empty());
     }
 
     #[test]
@@ -260,12 +263,12 @@ mod tests {
     fn store_round_trips_and_keeps_clips_folder() {
         let dir = std::env::temp_dir().join(format!("flash-settings-test-{}", std::process::id()));
         let mut store = Store::open(&dir, Path::new("/videos"));
-        let changed = store.update(&json!({ "theme": "bone", "clipsFolder": "/", "bufferLength": 10 })).unwrap();
-        assert_eq!(changed.get("theme"), Some(&json!("bone")));
+        let changed = store.update(&json!({ "overlayPosition": "top-right", "clipsFolder": "/", "bufferLength": 10 })).unwrap();
+        assert_eq!(changed.get("overlayPosition"), Some(&json!("top-right")));
         assert!(changed.get("clipsFolder").is_none());
         assert_eq!(store.values["shortClipSeconds"], json!(10));
         let reopened = Store::open(&dir, Path::new("/videos"));
-        assert_eq!(reopened.values["theme"], "bone");
+        assert_eq!(reopened.values["overlayPosition"], "top-right");
         assert_eq!(reopened.values["clipsFolder"], "/videos/Flash");
         std::fs::remove_dir_all(dir).ok();
     }

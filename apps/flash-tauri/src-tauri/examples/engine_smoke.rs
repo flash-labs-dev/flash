@@ -9,7 +9,7 @@ fn main() {
     engine::start(&dir, 0, 30, &engine::quality("1080p 60fps")).expect("engine start");
     std::thread::sleep(std::time::Duration::from_secs(6));
     println!("status: {}", engine::status());
-    let path = engine::save_clip(5.0, "Smoke").expect("save clip");
+    let (path, _) = engine::save_clip(5.0, "Smoke").expect("save clip");
     println!("clip: {path}");
     engine::stop();
 }

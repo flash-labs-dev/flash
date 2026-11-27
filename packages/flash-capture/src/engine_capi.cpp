@@ -111,7 +111,7 @@ extern "C" void flash_engine_stop(void) {
     encoder.reset(); video.reset(); audio.reset(); ring.reset(); audioBuffer.clear();
 }
 
-extern "C" int flash_engine_save_clip(double seconds, const char* game, char* path, size_t path_len, char* error, size_t error_len) {
+extern "C" int flash_engine_save_clip(double seconds, const char* game, char* path, size_t path_len, double* duration, char* error, size_t error_len) {
     if (failureStreak >= kEncoderDeadAfterFrames) return Fail(error, error_len, "the video encoder stopped accepting frames");
     std::vector<EncodedPacket> packets; std::vector<OwnedAudio> sound; std::string out, name = game && *game ? game : "Unknown";
     uint32_t w, h, f;
@@ -136,6 +136,7 @@ extern "C" int flash_engine_save_clip(double seconds, const char* game, char* pa
         for (auto& p : sound) views.push_back({p.samples.data(), p.frameCount, p.channels, p.sampleRate, p.timestampUs, p.sourceId});
         const auto meta = muxer->Write(out, packets, views, w, h, f, name);
         if (path && path_len) std::snprintf(path, path_len, "%s", meta.filePath.c_str());
+        if (duration) *duration = static_cast<double>(endUs - startUs) / 1e6;
         return 0;
     } catch (const std::exception& e) {
         return Fail(error, error_len, e.what());
@@ -171,3 +172,5 @@ extern "C" size_t flash_engine_displays(char* json, size_t len) {
     } catch (const std::exception&) {}
     return Emit(out + "]", json, len);
 }
+
+extern "C" void flash_engine_set_capture_window(uint32_t pid) { SetCaptureWindowPid(pid); }

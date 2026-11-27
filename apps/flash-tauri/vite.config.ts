@@ -29,5 +29,6 @@ export default defineConfig({
   // Tailwind finds classes from its base directory, which must be the desktop sources.
   css: { postcss: { plugins: [tailwind({ base: resolve(desktop, 'src') })] } },
   server: { port: 5174, strictPort: true, fs: { allow: [resolve(__dirname, '../..')] } },
-  build: { outDir: 'dist', emptyOutDir: true, target: 'es2022' },
+  build: { outDir: 'dist', emptyOutDir: true, target: 'es2022',
+    rollupOptions: { input: { main: resolve(__dirname, 'index.html'), toast: resolve(__dirname, 'toast.html') } } },
 })

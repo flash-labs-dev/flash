@@ -23,12 +23,15 @@ int flash_engine_start(const FlashEngineConfig* config, char* error, size_t erro
 /* Stops capture and frees the pipeline. Safe to call when not started. */
 void flash_engine_stop(void);
 /* Writes the last `seconds` of the buffer (0 = all of it) to a new clip under
- * clips_dir/<game>/. The clip's path is written into `path`. Blocks until done. */
-int flash_engine_save_clip(double seconds, const char* game, char* path, size_t path_len, char* error, size_t error_len);
+ * clips_dir/<game>/. The clip's path is written into `path` and its length in
+ * seconds into `duration` (may be NULL). Blocks until done. */
+int flash_engine_save_clip(double seconds, const char* game, char* path, size_t path_len, double* duration, char* error, size_t error_len);
 /* JSON object with recording, captureHealthy, capturePending, captureError,
  * captureBackend, bufferSeconds, encoder, width, height, fps. Returns the
  * length it needs; writes nothing if `len` is too small. */
 size_t flash_engine_status(char* json, size_t len);
+/* Record only this process's window (KDE Plasma), or the display when pid is 0. */
+void flash_engine_set_capture_window(uint32_t pid);
 /* JSON array of {id, name, width, height, isPrimary, refreshHz}. Same sizing rule. */
 size_t flash_engine_displays(char* json, size_t len);
 

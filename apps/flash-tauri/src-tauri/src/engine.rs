@@ -15,7 +15,8 @@ struct Config {
 extern "C" {
     fn flash_engine_start(config: *const Config, error: *mut c_char, error_len: usize) -> i32;
     fn flash_engine_stop();
-    fn flash_engine_save_clip(seconds: f64, game: *const c_char, path: *mut c_char, path_len: usize, error: *mut c_char, error_len: usize) -> i32;
+    fn flash_engine_save_clip(seconds: f64, game: *const c_char, path: *mut c_char, path_len: usize, duration: *mut f64, error: *mut c_char, error_len: usize) -> i32;
+    fn flash_engine_set_capture_window(pid: u32);
     fn flash_engine_status(json: *mut c_char, len: usize) -> usize;
     fn flash_engine_displays(json: *mut c_char, len: usize) -> usize;
 }
@@ -65,15 +66,18 @@ pub fn start(clips_dir: &str, display: u32, buffer_seconds: u32, quality: &Quali
 
 pub fn stop() { unsafe { flash_engine_stop() } }
 
-/// Blocks until the clip is written; call off the UI thread.
-pub fn save_clip(seconds: f64, game: &str) -> Result<String, String> {
+/// Blocks until the clip is written; call off the UI thread. Returns the path and length in seconds.
+pub fn save_clip(seconds: f64, game: &str) -> Result<(String, f64), String> {
     let game = CString::new(game).unwrap_or_default();
-    let (mut path, mut error) = ([0u8; 4096], [0u8; 512]);
-    match unsafe { flash_engine_save_clip(seconds, game.as_ptr(), path.as_mut_ptr().cast(), path.len(), error.as_mut_ptr().cast(), error.len()) } {
-        0 => Ok(text(&path)),
+    let (mut path, mut error, mut duration) = ([0u8; 4096], [0u8; 512], 0f64);
+    match unsafe { flash_engine_save_clip(seconds, game.as_ptr(), path.as_mut_ptr().cast(), path.len(), &mut duration, error.as_mut_ptr().cast(), error.len()) } {
+        0 => Ok((text(&path), duration)),
         _ => Err(text(&error)),
     }
 }
+
+/// KDE Plasma: record only this process's window; 0 records the display.
+pub fn set_capture_window(pid: u32) { unsafe { flash_engine_set_capture_window(pid) } }
 
 pub fn status() -> Value { json(flash_engine_status) }
 pub fn displays() -> Value { json(flash_engine_displays) }

@@ -11,7 +11,11 @@ const listeners = new Map<string, Set<Listener>>()
 const event: IpcRendererEvent = { sender: null }
 
 export const ipcRenderer = {
-  invoke: (channel: string, ...args: unknown[]) => invoke('ipc', { channel, args }),
+  // Bytes cross as number arrays (JSON); thumbnail-read is the one call that returns them.
+  invoke: async (channel: string, ...args: unknown[]) => {
+    const result = await invoke('ipc', { channel, args: args.map(a => a instanceof Uint8Array ? Array.from(a) : a) })
+    return channel === 'thumbnail-read' && Array.isArray(result) ? new Uint8Array(result) : result
+  },
   send(channel: string, ...args: unknown[]) {
     invoke('ipc', { channel, args }).catch(error => console.warn(`flash: ${channel} failed`, error))
   },

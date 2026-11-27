@@ -38,7 +38,7 @@ fn build_engine() {
         println!("cargo:rustc-link-lib=static={lib}");
     }
     let libs = Command::new("pkg-config")
-        .args(["--libs", "libpipewire-0.3", "gio-2.0", "gio-unix-2.0", "libva", "libva-drm", "openh264", "zlib"])
+        .args(["--libs", "libpipewire-0.3", "gio-2.0", "gio-unix-2.0", "libva", "libva-drm", "openh264", "zlib", "wayland-client"])
         .output().expect("pkg-config is required");
     assert!(libs.status.success(), "pkg-config could not find the engine's system libraries");
     for flag in String::from_utf8_lossy(&libs.stdout).split_whitespace() {
