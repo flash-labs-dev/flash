@@ -1,4 +1,5 @@
 // L1 backend: not yet compiled or run on Linux hardware.
+#include <array>
 #include "linux_backend.h"
 #include "../../core/export_budget.h"
 #include "../../core/audio_tracks.h"
@@ -200,7 +201,11 @@ public:
         }
         std::vector<std::unique_ptr<Media>> encoders;
         std::vector<AudioPcm> pcm;
-        for (const std::string_view name : kAudioTrackOrder) {
+        // Desktop audio ("other": game + voice chat) goes first: players without
+        // track selection play only the first audio track. Tracks are found by
+        // handler_name on Linux, so this order is not a file format here.
+        static constexpr std::array<std::string_view, kAudioTrackCount> kLinuxFileOrder{"other", "game", "mic", "discord", "music"};
+        for (const std::string_view name : kLinuxFileOrder) {
             const std::string id(name);
             if (std::none_of(audio.begin(), audio.end(), [&](const AudioData& p) { return p.sourceId == id; })) continue;
             AudioPcm track{id, std::vector<float>(static_cast<size_t>(av_rescale(end - base, 48000, 1000000)) * 2, 0)};

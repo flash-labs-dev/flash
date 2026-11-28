@@ -8,3 +8,5 @@ const query = new URLSearchParams(location.search)
 document.open()
 document.write(toastHtml(DEFAULT_THEME, geist, Number(query.get('duration')) || 0, query.get('game') ?? '', query.get('position') ?? 'top-left'))
 document.close()
+// WebKitGTK copies the page title to the window: keep the one KWin's toast rule and script match.
+document.title = `Flash toast ${query.get('position') ?? 'top-left'}`

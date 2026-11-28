@@ -218,6 +218,31 @@ workspace.windowAdded.connect(function (w) { place(w); w.captionChanged.connect(
         .and_then(|out| out.trim().trim_matches(|c| c == '(' || c == ')' || c == ',').trim_start_matches("int32").trim().parse::<i32>().ok())
         .filter(|id| *id >= 0) else { eprintln!("flash: could not load the KWin toast script"); return };
     call(&format!("/Scripting/Script{id}"), "org.kde.kwin.Script.run", &[]);
+    toast_focus_rule();
+}
+
+/// A KWin window rule so the toast never takes focus. Wayland ignores the
+/// window's own "don't focus me" hint, and a fullscreen game that loses focus
+/// drops out of fullscreen (SDL minimizes). Rules are the one thing KWin honours.
+fn toast_focus_rule() {
+    const GROUP: &str = "flash-toast";
+    let read = |key: &str| Command::new("kreadconfig6").args(["--file", "kwinrulesrc", "--group", "General", "--key", key]).output().ok()
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_owned()).unwrap_or_default();
+    let write = |group: &str, key: &str, value: &str| Command::new("kwriteconfig6")
+        .args(["--file", "kwinrulesrc", "--group", group, "--key", key, value]).status().is_ok_and(|s| s.success());
+    for (key, value) in [("Description", "Flash clip notification"), ("title", "Flash toast"), ("titlematch", "2"),
+        ("acceptfocus", "false"), ("acceptfocusrule", "2"), ("fsplevel", "4"), ("fsplevelrule", "2"), ("above", "true"), ("aboverule", "2")] {
+        if !write(GROUP, key, value) { return }
+    }
+    // KWin keeps the rule list under "rules" (older) or "Order" (Plasma 6).
+    let (rules, order) = (read("rules"), read("Order"));
+    let mut list: Vec<&str> = rules.split(',').filter(|r| !r.is_empty()).collect();
+    if !list.contains(&GROUP) && !order.split(',').any(|r| r == GROUP) {
+        list.push(GROUP);
+        write("General", "rules", &list.join(","));
+        write("General", "count", &list.len().to_string());
+    }
+    Command::new("gdbus").args(["call", "--session", "--dest", "org.kde.KWin", "--object-path", "/KWin", "--method", "org.kde.KWin.reconfigure"]).output().ok();
 }
 
 fn autostart_path() -> PathBuf {
